@@ -127,7 +127,7 @@
           "title": "Source files",
           "description": "Source files to download for this component"
         },
-        "default-package-config": {
+"default-package-config": {
           "$ref": "#/$defs/PackageConfig",
           "title": "Default package config",
           "description": "Default configuration applied to all binary packages produced by this component"
@@ -139,6 +139,11 @@
           "type": "object",
           "title": "Package overrides",
           "description": "Per-package configuration overrides keyed by exact binary package name"
+        },
+        "rust-vendor": {
+          "$ref": "#/$defs/RustVendorConfig",
+          "title": "Rust vendor",
+          "description": "Configuration for Rust vendor bundling"
         }
       },
       "additionalProperties": false,
@@ -518,7 +523,9 @@
         "type": {
           "type": "string",
           "enum": [
-            "download"
+            "download",
+            "cargo-vendor",
+            "rust2rpm"
           ],
           "title": "Origin type",
           "description": "Type of origin for this source file"
@@ -530,6 +537,11 @@
           "examples": [
             "https://example.com/source.tar.gz"
           ]
+        },
+        "crates-file": {
+          "type": "string",
+          "title": "Crates file",
+          "description": "Path to the .crates file relative to the sources directory (for cargo-vendor and rust2rpm origins)"
         }
       },
       "additionalProperties": false,
@@ -650,6 +662,25 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "RustVendorConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enabled",
+          "description": "When true enables Rust vendor bundling for this component"
+        },
+        "crates-file": {
+          "type": "string",
+          "title": "Crates file",
+          "description": "Name of the .crates file relative to the sources directory. Auto-discovered when omitted."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "enabled"
+      ]
     },
     "SourceFileReference": {
       "properties": {

@@ -272,15 +272,10 @@ func (m *sourceManager) FetchFiles(
 		return nil
 	}
 
-	httpDownloader, err := downloader.NewHTTPDownloader(m.dryRunnable, m.eventListener, m.fs)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP downloader:\n%w", err)
-	}
-
 	for i := range sourceFiles {
 		fileRef := &sourceFiles[i]
 
-		err := m.fetchSourceFile(ctx, httpDownloader, component, fileRef, destDirPath)
+		err := m.fetchSourceFile(ctx, component, fileRef, destDirPath)
 		if err != nil {
 			return fmt.Errorf("failed to fetch source file %#q:\n%w", fileRef.Filename, err)
 		}
@@ -289,157 +284,47 @@ func (m *sourceManager) FetchFiles(
 	return nil
 }
 
-// fetchSourceFile downloads a source file, trying the lookaside cache first and falling
-// back to the configured origin. When disable-origins is set, fallback is disabled.
+// fetchSourceFile acquires a single source file by delegating to the appropriate
+// [originHandler] for the file's origin type. Download-type origins check for
+// existing files first; generative origins always regenerate.
 func (m *sourceManager) fetchSourceFile(
 	ctx context.Context,
-	httpDownloader downloader.Downloader,
 	component components.Component,
 	fileRef *projectconfig.SourceFileReference,
 	destDirPath string,
 ) error {
-	// Validate filename to prevent path traversal vulnerabilities
+	// Validate filename to prevent path traversal vulnerabilities.
 	if err := fileutils.ValidateFilename(fileRef.Filename); err != nil {
 		return fmt.Errorf("invalid source file reference:\n%w", err)
 	}
 
 	destPath := filepath.Join(destDirPath, fileRef.Filename)
 
-	sourceExists, err := fileutils.Exists(m.fs, destPath)
-	if err != nil {
-		return fmt.Errorf("failed to check existence of destination file %#q:\n%w", destPath, err)
-	}
+	// For non-generative origins, skip if the file already exists.
+	if !isGenerativeOrigin(fileRef.Origin.Type) {
+		sourceExists, err := fileutils.Exists(m.fs, destPath)
+		if err != nil {
+			return fmt.Errorf("failed to check existence of destination file %#q:\n%w", destPath, err)
+		}
 
-	if sourceExists {
-		slog.Debug("Source file already exists, skipping download",
-			"filename", fileRef.Filename,
-			"path", destPath)
+		if sourceExists {
+			slog.Debug("Source file already exists, skipping",
+				"filename", fileRef.Filename,
+				"path", destPath)
 
-		return nil
-	}
-
-	// Phase 1: Try lookaside cache if hash info is available
-	if fileRef.Hash != "" && fileRef.HashType != "" {
-		lookasideErr := m.tryLookasideDownload(ctx, httpDownloader, component, fileRef, destPath)
-		if lookasideErr == nil {
 			return nil
 		}
-
-		slog.Debug("Lookaside cache download failed",
-			"filename", fileRef.Filename,
-			"error", lookasideErr)
 	}
 
-	// Phase 2: Fall back to configured origin (not allowed when disable-origins is set)
-	if m.disableOrigins {
-		return fmt.Errorf("source file %#q not found in lookaside cache and disable-origins is enabled in the distro config",
-			fileRef.Filename)
-	}
-
-	if fileRef.Origin.Type == "" {
-		return fmt.Errorf("source file %#q not found in lookaside cache and no origin configured",
-			fileRef.Filename)
-	}
-
-	return m.downloadFromOrigin(ctx, httpDownloader, fileRef, destPath)
-}
-
-// tryLookasideDownload attempts to download a source file from the lookaside cache.
-// Returns nil on success, or an error if the download fails.
-func (m *sourceManager) tryLookasideDownload(
-	ctx context.Context,
-	httpDownloader downloader.Downloader,
-	component components.Component,
-	fileRef *projectconfig.SourceFileReference,
-	destPath string,
-) error {
-	if m.lookasideBaseURI == "" {
-		return errors.New("no lookaside cache configured")
-	}
-
-	packageName := resolvePackageName(component)
-
-	sourceURL, err := fedorasource.BuildLookasideURL(m.lookasideBaseURI, packageName, fileRef.Filename,
-		string(fileRef.HashType), fileRef.Hash)
+	// Resolve the handler for this origin type and delegate.
+	handler, err := m.resolveOriginHandler(fileRef.Origin.Type)
 	if err != nil {
-		return fmt.Errorf("failed to build lookaside URL for %#q:\n%w", fileRef.Filename, err)
+		return fmt.Errorf("failed to resolve handler for source file %#q:\n%w", fileRef.Filename, err)
 	}
 
-	slog.Info("Downloading source file from lookaside cache...",
-		"filename", fileRef.Filename,
-		"url", sourceURL)
-
-	err = m.downloadAndValidate(ctx, httpDownloader, sourceURL, destPath, fileRef)
+	err = handler.Handle(ctx, component, fileRef, destPath, destDirPath)
 	if err != nil {
-		return fmt.Errorf("lookaside cache download failed for %#q:\n%w", fileRef.Filename, err)
-	}
-
-	return nil
-}
-
-// downloadFromOrigin downloads a source file using its configured origin.
-func (m *sourceManager) downloadFromOrigin(
-	ctx context.Context,
-	httpDownloader downloader.Downloader,
-	fileRef *projectconfig.SourceFileReference,
-	destPath string,
-) error {
-	switch fileRef.Origin.Type {
-	case projectconfig.OriginTypeURI:
-		if fileRef.Origin.Uri == "" {
-			return fmt.Errorf("no URI configured for source file %#q with origin type %#q",
-				fileRef.Filename, fileRef.Origin.Type)
-		}
-
-		slog.Info("Downloading source file from origin URL...",
-			"filename", fileRef.Filename,
-			"origin", fileRef.Origin.Uri,
-			"destination", destPath)
-
-		err := m.downloadAndValidate(ctx, httpDownloader, fileRef.Origin.Uri, destPath, fileRef)
-		if err != nil {
-			return fmt.Errorf("failed to retrieve source file %#q:\n%w", fileRef.Filename, err)
-		}
-
-		return nil
-
-	default:
-		return fmt.Errorf("unsupported origin type %#q for source file %#q",
-			fileRef.Origin.Type, fileRef.Filename)
-	}
-}
-
-// downloadAndValidate downloads a file from the given URL with retries, optionally
-// validating its hash. On failure, any partial file is cleaned up.
-func (m *sourceManager) downloadAndValidate(
-	ctx context.Context,
-	httpDownloader downloader.Downloader,
-	sourceURL string,
-	destPath string,
-	fileRef *projectconfig.SourceFileReference,
-) error {
-	err := retry.Do(ctx, m.retryConfig, func() error {
-		_ = m.fs.Remove(destPath)
-
-		downloadErr := httpDownloader.Download(ctx, sourceURL, destPath)
-		if downloadErr != nil {
-			return fmt.Errorf("failed to download %#q from %#q:\n%w",
-				fileRef.Filename, sourceURL, downloadErr)
-		}
-
-		if fileRef.Hash != "" && fileRef.HashType != "" {
-			hashErr := fileutils.ValidateFileHash(m.dryRunnable, m.fs, fileRef.HashType, destPath, fileRef.Hash)
-			if hashErr != nil {
-				return fmt.Errorf("hash validation failed for %#q:\n%w", fileRef.Filename, hashErr)
-			}
-		}
-
-		return nil
-	})
-	if err != nil {
-		_ = m.fs.Remove(destPath)
-
-		return fmt.Errorf("download failed:\n%w", err)
+		return fmt.Errorf("origin handler failed for source file %#q:\n%w", fileRef.Filename, err)
 	}
 
 	return nil

@@ -172,17 +172,7 @@ func NewPreparer(
 func (p *sourcePreparerImpl) PrepareSources(
 	ctx context.Context, component components.Component, outputDir string, applyOverlays bool,
 ) error {
-	// Use the source manager to fetch source files (archives, patches, etc.)
-	// Skip this step when skipLookaside is set — source tarballs are not needed
-	// for rendering and are the most expensive download.
-	if !p.skipLookaside {
-		err := p.sourceManager.FetchFiles(ctx, component, outputDir)
-		if err != nil {
-			return fmt.Errorf("failed to fetch source files for component %#q:\n%w",
-				component.GetName(), err)
-		}
-	}
-
+	// Step 1: Fetch the component (spec file and sidecar files, including any .crates files).
 	// Preserve the upstream .git directory only when dist-git creation is
 	// requested via --with-git. This is required so that overlay commits can be
 	// appended on top of the upstream commit log during synthetic history generation.
@@ -200,6 +190,34 @@ func (p *sourcePreparerImpl) PrepareSources(
 	if err != nil {
 		return fmt.Errorf("failed to fetch sources for component %#q:\n%w",
 			component.GetName(), err)
+	}
+
+	// Step 2: If rust-vendor is enabled, synthesize source-file entries and prepend them
+	// to the component's SourceFiles so FetchFiles processes them along with any
+	// user-defined entries. Synthesized entries come first so that user-defined
+	// source-files (processed later in iteration order) can override them.
+	vendorFiles, err := synthesizeRustVendorFiles(component, outputDir)
+	if err != nil {
+		return fmt.Errorf("failed to synthesize rust vendor files for component %#q:\n%w",
+			component.GetName(), err)
+	}
+
+	if len(vendorFiles) > 0 {
+		cfg := component.GetConfig()
+		cfg.SourceFiles = append(vendorFiles, cfg.SourceFiles...)
+	}
+
+	// Step 3: Fetch source files (archives, patches, etc.) — including any synthesized
+	// entries. Source files always overwrite files placed by FetchComponent,
+	// giving them the highest specificity.
+	// Skip this step when skipLookaside is set — source tarballs are not needed
+	// for rendering and are the most expensive download.
+	if !p.skipLookaside {
+		err = p.sourceManager.FetchFiles(ctx, component, outputDir)
+		if err != nil {
+			return fmt.Errorf("failed to fetch source files for component %#q:\n%w",
+				component.GetName(), err)
+		}
 	}
 
 	if applyOverlays {

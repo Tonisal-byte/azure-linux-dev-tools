@@ -14,6 +14,7 @@ A component definition tells azldev where to find the spec file, how to customiz
 | Source files | `source-files` | array of [SourceFileReference](#source-file-references) | No | Additional source files to download for this component |
 | Default package config | `default-package-config` | [PackageConfig](package-groups.md#package-config) | No | Default configuration applied to all binary packages produced by this component; overrides project defaults and package-group defaults |
 | Package overrides | `packages` | map of string → [PackageConfig](package-groups.md#package-config) | No | Exact per-package configuration overrides; highest priority in the resolution order |
+| Rust vendor | `rust-vendor` | [RustVendorConfig](#rust-vendor-bundling) | No | Configuration for Rust vendor dependency bundling |
 
 ### Bare Components
 
@@ -261,8 +262,11 @@ The `origin` field specifies how to obtain the source file.
 
 | Field | TOML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
-| Type | `type` | string | **Yes** | Origin type. Currently only `"download"` is supported. |
+| Type | `type` | string | **Yes** | Origin type: `"download"`, `"cargo-vendor"`, or `"rust2rpm"`. |
 | URI | `uri` | string | No | URI to download the file from (required when type is `"download"`) |
+| Crates file | `crates-file` | string | No | Name of the `.crates` file relative to the sources directory (for `"cargo-vendor"` and `"rust2rpm"` types) |
+
+> **Note:** The `cargo-vendor` and `rust2rpm` origin types are primarily used internally by the [Rust vendor bundling](#rust-vendor-bundling) feature. You generally do not need to specify them manually in `[[source-files]]` entries.
 
 ### Example
 
@@ -279,6 +283,37 @@ hash = "57aa116d1c91a9ec36ab8b46c9164ae19af192b..."
 hash-type = "SHA512"
 origin = { type = "download", uri = "https://example.com/repo/pkgs/shim/shimaa64.efi/sha512/.../shimaa64.efi" }
 ```
+
+## Rust Vendor Bundling
+
+The `[components.<name>.rust-vendor]` section enables Rust vendor dependency bundling for a component. When enabled, azldev automatically:
+
+1. Generates a vendor-aware spec file using `rust2rpm --vendor`, replacing the original spec.
+2. Generates a vendored dependencies tarball using `cargo vendor` against the component's `.crates` file.
+
+Both generated files are produced *after* the component's spec and sidecar files are fetched but *before* overlays are applied, so any configured overlays still take effect on top of the vendor-aware spec.
+
+| Field | TOML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Enabled | `enabled` | boolean | **Yes** | Enables Rust vendor bundling for this component |
+| Crates file | `crates-file` | string | No | Name of the `.crates` file relative to the sources directory. When omitted, azldev auto-discovers the `.crates` file by globbing `*.crates` in the sources directory. |
+
+### Minimal example
+
+```toml
+[components.my-rust-crate.rust-vendor]
+enabled = true
+```
+
+### With explicit crates file
+
+```toml
+[components.my-rust-crate.rust-vendor]
+enabled = true
+crates-file = "my-rust-crate-1.2.3.crates"
+```
+
+> **Note:** Rust vendor bundling requires `rust2rpm` and `cargo` to be available in the build environment.
 
 ## Complete Examples
 
