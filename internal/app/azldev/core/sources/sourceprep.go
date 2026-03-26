@@ -147,12 +147,11 @@ func (p *sourcePreparerImpl) PrepareSources(
 			component.GetName(), err)
 	}
 
-	if !applyOverlays {
-		return nil
-	}
-
-	if err := p.applyOverlaysToSources(ctx, component, outputDir); err != nil {
-		return err
+	if applyOverlays {
+		err := p.applyOverlaysToSources(ctx, component, outputDir)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Record the changes as synthetic git history when dist-git creation is enabled.
@@ -229,15 +228,13 @@ func (p *sourcePreparerImpl) applyOverlays(
 }
 
 // collectOverlays gathers all overlays for a component into a single ordered slice:
-// user overlays first, followed by macros-load, check-skip, and file-header overlays.
+// macros-load first, then user overlays, followed by check-skip and file-header overlays.
 func (p *sourcePreparerImpl) collectOverlays(
 	component components.Component, macrosFileName string,
 ) ([]projectconfig.ComponentOverlay, error) {
 	config := component.GetConfig()
 
 	var allOverlays []projectconfig.ComponentOverlay
-
-	allOverlays = append(allOverlays, config.Overlays...)
 
 	if macrosFileName != "" {
 		macroOverlays, err := synthesizeMacroLoadOverlays(macrosFileName)
@@ -248,6 +245,7 @@ func (p *sourcePreparerImpl) collectOverlays(
 		allOverlays = append(allOverlays, macroOverlays...)
 	}
 
+	allOverlays = append(allOverlays, config.Overlays...)
 	allOverlays = append(allOverlays, synthesizeCheckSkipOverlays(config.Build.Check)...)
 	allOverlays = append(allOverlays, generateFileHeaderOverlay()...)
 
@@ -276,9 +274,8 @@ func initSourcesRepo(sourcesDirPath string) (*gogit.Repository, error) {
 
 	_, err = worktree.Commit("Initial sources", &gogit.CommitOptions{
 		Author: &object.Signature{
-			Name:  "azldev",
-			Email: "azldev@microsoft.com",
-			When:  time.Unix(0, 0).UTC(),
+			Name: "azldev",
+			When: time.Unix(0, 0).UTC(),
 		},
 	})
 	if err != nil {
@@ -293,7 +290,6 @@ func initSourcesRepo(sourcesDirPath string) (*gogit.Repository, error) {
 // with an initial commit so Affects commits can be layered on uniformly for all
 // component types.
 //
-// Returns nil when there are no Affects commits to apply.
 // Returns a non-nil error if history generation fails.
 func (p *sourcePreparerImpl) trySyntheticHistory(
 	component components.Component,

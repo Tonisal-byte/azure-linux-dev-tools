@@ -175,7 +175,7 @@ func TestFindAffectsCommits_AffectsInSubject(t *testing.T) {
 
 	// Affects marker in the subject line (not just the body).
 	addCommit(t, repo,
-		"Affects: curl - fix build failure",
+		"Affects: curl",
 		"Alice", "alice@example.com",
 		time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
 
@@ -214,6 +214,36 @@ func TestFindAffectsCommits_CaseSensitive(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Alice", results[0].Author)
+}
+
+func TestMessageAffectsComponent(t *testing.T) {
+	tests := []struct {
+		name      string
+		message   string
+		component string
+		want      bool
+	}{
+		// Positive matches.
+		{"exact match in body", "Fix bug\n\nAffects: curl", "curl", true},
+		{"trailing whitespace", "Fix bug\n\nAffects: curl  ", "curl", true},
+		{"leading whitespace on line", "Fix bug\n\n  Affects: curl", "curl", true},
+		{"subject line only", "Affects: curl", "curl", true},
+
+		// Negative matches.
+		{"different component", "Fix bug\n\nAffects: wget", "curl", false},
+		{"no substring match", "Fix bug\n\nAffects: curl-minimal", "curl", false},
+		{"comma separated", "Fix bug\n\nAffects: curl, wget", "curl", false},
+		{"extra text after name", "Affects: curl - fix build failure", "curl", false},
+		{"case sensitive", "Fix bug\n\nAffects: Curl", "curl", false},
+		{"no match across newlines", "Fix bug\n\nAffects:\ncurl", "curl", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sources.MessageAffectsComponent(tt.message, tt.component)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestCommitSyntheticHistory(t *testing.T) {
@@ -377,14 +407,4 @@ func TestCommitSyntheticHistory_SingleCommit(t *testing.T) {
 	content, err := entry.Contents()
 	require.NoError(t, err)
 	assert.Contains(t, content, "# modified")
-}
-
-func TestCommitSyntheticHistory_EmptyCommits(t *testing.T) {
-	repo := createInMemoryRepo(t)
-
-	addCommit(t, repo, "initial", "Test", "test@example.com",
-		time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
-
-	err := sources.CommitSyntheticHistory(repo, nil)
-	assert.ErrorIs(t, err, sources.ErrNoOverlaysToCommit)
 }

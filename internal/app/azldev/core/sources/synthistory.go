@@ -4,10 +4,8 @@
 package sources
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -19,18 +17,9 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 )
 
-// affectsRegexPattern is the regex pattern prefix used to match an [AffectsPrefix] marker
-// line in a commit message. It is combined with a quoted component name to form the full
-// match expression.
-const affectsRegexPattern = `(?m)^\s*Affects:\s*`
-
-var (
-	// ErrNoGitRepository is returned when no enclosing git repository can be found.
-	ErrNoGitRepository = errors.New("no git repository found")
-
-	// ErrNoOverlaysToCommit is returned when there are no synthetic commits to create.
-	ErrNoOverlaysToCommit = errors.New("no synthetic commits to create")
-)
+// affectsRegexPattern is the regex pattern prefix used to match an "Affects:" trailer
+// line in a commit message. Each line must contain exactly one component name.
+const affectsRegexPattern = `(?m)^[ \t]*Affects:[ \t]*`
 
 // CommitMetadata holds full metadata for a commit in the project repository.
 type CommitMetadata struct {
@@ -41,9 +30,17 @@ type CommitMetadata struct {
 	Message     string
 }
 
+// MessageAffectsComponent reports whether a commit message contains an "Affects:"
+// trailer line naming the given component.
+func MessageAffectsComponent(message, componentName string) bool {
+	re := regexp.MustCompile(affectsRegexPattern + regexp.QuoteMeta(componentName) + `[ \t]*$`)
+
+	return re.MatchString(message)
+}
+
 // FindAffectsCommits walks the git log from HEAD and returns metadata for all commits
-// whose message contains "Affects: <componentName>". Results are sorted chronologically
-// (oldest first).
+// whose message contains an "Affects: <componentName>" trailer line. Results are sorted
+// chronologically (oldest first).
 func FindAffectsCommits(repo *gogit.Repository, componentName string) ([]CommitMetadata, error) {
 	head, err := repo.Head()
 	if err != nil {
@@ -57,10 +54,8 @@ func FindAffectsCommits(repo *gogit.Repository, componentName string) ([]CommitM
 
 	var matches []CommitMetadata
 
-	re := regexp.MustCompile(affectsRegexPattern + regexp.QuoteMeta(componentName) + `(?:$|\s|[,;])`)
-
 	err = commitIter.ForEach(func(commit *object.Commit) error {
-		if re.MatchString(commit.Message) {
+		if MessageAffectsComponent(commit.Message, componentName) {
 			matches = append(matches, CommitMetadata{
 				Hash:        commit.Hash.String(),
 				Author:      commit.Author.Name,
@@ -85,16 +80,11 @@ func FindAffectsCommits(repo *gogit.Repository, componentName string) ([]CommitM
 // CommitSyntheticHistory stages all pending working tree changes and creates synthetic
 // commits in the provided git repository. The first commit captures all file changes;
 // subsequent commits are created as empty commits to preserve the commit count for
-// rpmautospec release numbering. Overlay application must happen before calling this
-// function — it only handles the git history.
+// rpmautospec release numbering.
 func CommitSyntheticHistory(
 	repo *gogit.Repository,
 	commits []CommitMetadata,
 ) error {
-	if len(commits) == 0 {
-		return ErrNoOverlaysToCommit
-	}
-
 	worktree, err := repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree:\n%w", err)
@@ -112,11 +102,11 @@ func CommitSyntheticHistory(
 			"projectHash", commitMeta.Hash,
 		)
 
-		message := fmt.Sprintf("[azldev] %s\n\nProject commit: %s",
+		message := fmt.Sprintf("%s\n\nProject commit: %s",
 			commitMeta.Message, commitMeta.Hash)
 
 		_, err := worktree.Commit(message, &gogit.CommitOptions{
-			AllowEmptyCommits: commitIdx > 0,
+			AllowEmptyCommits: true,
 			Author: &object.Signature{
 				Name:  commitMeta.Author,
 				Email: commitMeta.AuthorEmail,
@@ -136,9 +126,8 @@ func CommitSyntheticHistory(
 
 // buildSyntheticCommits resolves the project repository from the component's config file,
 // walks the git log for commits containing "Affects: <componentName>", and returns the
-// matching commit metadata sorted chronologically.
-//
-// Returns nil when no matching commits are found.
+// matching commit metadata sorted chronologically. If no Affects commits are found, a
+// single default overlay commit is returned instead.
 func buildSyntheticCommits(
 	config *projectconfig.ComponentConfig, componentName string,
 ) ([]CommitMetadata, error) {
@@ -151,7 +140,7 @@ func buildSyntheticCommits(
 		return nil, nil
 	}
 
-	projectRepo, _, err := openProjectRepo(configFilePath)
+	projectRepo, err := openProjectRepo(configFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -165,21 +154,41 @@ func buildSyntheticCommits(
 		"component", componentName,
 		"commitCount", len(affectsCommits))
 
-	commits := make([]CommitMetadata, 0, len(affectsCommits))
-
-	// Create one synthetic commit per Affects commit, preserving each commit's
-	// original message and author attribution in the upstream history.
-	commits = append(commits, affectsCommits...)
-
-	if len(commits) == 0 {
-		slog.Warn("No commits with Affects marker found; "+
-			"falling back to standard overlay processing",
+	if len(affectsCommits) == 0 {
+		slog.Info("No commits with Affects marker found; "+
+			"creating default commit",
 			"component", componentName)
 
-		return nil, nil
+		return []CommitMetadata{
+			defaultOverlayCommit(projectRepo, componentName),
+		}, nil
 	}
 
-	return commits, nil
+	return affectsCommits, nil
+}
+
+// defaultOverlayCommit returns a single [CommitMetadata] entry that represents a generic
+// commit when no Affects commits exist in the project history. The commit hash is
+// set to the current HEAD of the project repository.
+func defaultOverlayCommit(repo *gogit.Repository, componentName string) CommitMetadata {
+	var (
+		timestamp int64
+		hash      string
+	)
+
+	if head, err := repo.Head(); err == nil {
+		hash = head.Hash().String()
+		if commit, commitErr := repo.CommitObject(head.Hash()); commitErr == nil {
+			timestamp = commit.Author.When.Unix()
+		}
+	}
+
+	return CommitMetadata{
+		Hash:      hash,
+		Author:    "azldev",
+		Timestamp: timestamp,
+		Message:   "Latest state for " + componentName,
+	}
 }
 
 // resolveConfigFilePath extracts and validates the source config file path from the component config.
@@ -197,53 +206,18 @@ func resolveConfigFilePath(config *projectconfig.ComponentConfig, componentName 
 	return configFilePath, nil
 }
 
-// openProjectRepo finds the git repository root containing configFilePath, opens it, and
-// returns the repository handle along with the config file path relative to the repo root.
-func openProjectRepo(configFilePath string) (*gogit.Repository, string, error) {
-	projectRepoPath, err := findRepoRoot(filepath.Dir(configFilePath))
+// openProjectRepo finds and opens the git repository containing configFilePath by
+// walking up the directory tree.
+func openProjectRepo(configFilePath string) (*gogit.Repository, error) {
+	repo, err := gogit.PlainOpenWithOptions(filepath.Dir(configFilePath), &gogit.PlainOpenOptions{
+		DetectDotGit: true,
+	})
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to find project repository for config file %#q:\n%w",
+		return nil, fmt.Errorf("failed to find project repository for config file %#q:\n%w",
 			configFilePath, err)
 	}
 
-	projectRepo, err := gogit.PlainOpen(projectRepoPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to open project repository at %#q:\n%w", projectRepoPath, err)
-	}
-
-	relConfigPath, err := filepath.Rel(projectRepoPath, configFilePath)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to compute relative config path:\n%w", err)
-	}
-
-	return projectRepo, relConfigPath, nil
-}
-
-// findRepoRoot walks up the directory tree from startDir to find a directory containing
-// a .git directory or file (for worktrees).
-func findRepoRoot(startDir string) (string, error) {
-	dir, err := filepath.Abs(startDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to get absolute path for %#q:\n%w", startDir, err)
-	}
-
-	for {
-		gitPath := filepath.Join(dir, ".git")
-
-		if info, statErr := os.Stat(gitPath); statErr == nil {
-			// Accept both .git directories and .git files (for git worktrees).
-			if info.IsDir() || info.Mode().IsRegular() {
-				return dir, nil
-			}
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("%w: searched from %#q to filesystem root", ErrNoGitRepository, startDir)
-		}
-
-		dir = parent
-	}
+	return repo, nil
 }
 
 // unixToTime converts a Unix timestamp to a [time.Time] in UTC.
