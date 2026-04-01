@@ -12,6 +12,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/config"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/docs"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/image"
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/pkg"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/project"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/cmds/version"
 )
@@ -38,6 +39,7 @@ func InstantiateApp() *azldev.App {
 	config.OnAppInit(app)
 	docs.OnAppInit(app)
 	image.OnAppInit(app)
+	pkg.OnAppInit(app)
 	project.OnAppInit(app)
 	version.OnAppInit(app)
 

@@ -14,6 +14,7 @@ Primary commands:
   [1;36mconfig[0m       Manage tool configuration
   [1;36mdocs[0m         Documentation commands
   [1;36mimage[0m        Manage Azure Linux images
+  [1;36mpackage[0m      Manage binary package configuration
   [1;36mproject[0m      Manage Azure Linux projects
 
 Meta commands:

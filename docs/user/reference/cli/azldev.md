@@ -39,6 +39,7 @@ lives), or use -C to point to one.
 * [azldev config](azldev_config.md)	 - Manage tool configuration
 * [azldev docs](azldev_docs.md)	 - Documentation commands
 * [azldev image](azldev_image.md)	 - Manage Azure Linux images
+* [azldev package](azldev_package.md)	 - Manage binary package configuration
 * [azldev project](azldev_project.md)	 - Manage Azure Linux projects
 * [azldev version](azldev_version.md)	 - Print the CLI version
 

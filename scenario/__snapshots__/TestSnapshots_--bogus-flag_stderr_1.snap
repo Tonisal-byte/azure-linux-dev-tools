@@ -7,6 +7,7 @@ Primary commands:
   config      Manage tool configuration
   docs        Documentation commands
   image       Manage Azure Linux images
+  package     Manage binary package configuration
   project     Manage Azure Linux projects
 
 Meta commands:

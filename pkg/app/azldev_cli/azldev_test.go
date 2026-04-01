@@ -27,6 +27,7 @@ func TestInstantiateApp(t *testing.T) {
 				"config",
 				"docs",
 				"image",
+				"package",
 				"project",
 				"version",
 			},
