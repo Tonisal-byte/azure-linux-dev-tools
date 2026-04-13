@@ -13,6 +13,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/componentbuilder"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources/synthesis"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/workdir"
 	"github.com/microsoft/azure-linux-dev-tools/internal/buildenv"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
@@ -258,6 +259,8 @@ func BuildComponent(
 			sources.WithDirtyDetection(),
 		)
 	}
+
+	preparerOpts = append(preparerOpts, sources.WithSynthesizers(synthesis.DefaultSynthesizers()...))
 
 	sourcePreparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
 	if err != nil {

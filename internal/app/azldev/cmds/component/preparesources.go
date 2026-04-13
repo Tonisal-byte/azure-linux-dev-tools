@@ -11,6 +11,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources/synthesis"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 	"github.com/spf13/cobra"
@@ -145,6 +146,8 @@ func PrepareComponentSources(env *azldev.Env, options *PrepareSourcesOptions) er
 	if options.SkipSources {
 		preparerOpts = append(preparerOpts, sources.WithSkipLookaside())
 	}
+
+	preparerOpts = append(preparerOpts, sources.WithSynthesizers(synthesis.DefaultSynthesizers()...))
 
 	preparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
 	if err != nil {

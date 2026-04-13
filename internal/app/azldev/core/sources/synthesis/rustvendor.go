@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-package sources
+package synthesis
 
 import (
 	"fmt"
@@ -13,17 +13,22 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 )
 
-// synthesizeRustVendorFiles generates synthetic [projectconfig.SourceFileReference] entries
-// for Rust vendor bundling. When rust-vendor is enabled on a component, this function produces
+// RustVendorSynthesizer generates synthetic [projectconfig.SourceFileReference] entries
+// for Rust vendor bundling. When rust-vendor is enabled on a component, it produces
 // two entries:
 //   - A rust2rpm origin entry that regenerates the spec file with vendor support.
 //   - A cargo-vendor origin entry that generates the vendored dependencies tarball.
 //
 // The .crates file is either taken from the component's explicit configuration or
 // auto-discovered by globbing *.crates in the sources directory.
-//
+type RustVendorSynthesizer struct{}
+
+// Ensure [RustVendorSynthesizer] implements [Synthesizer].
+var _ Synthesizer = (*RustVendorSynthesizer)(nil)
+
+// SynthesizeSourceFiles implements [Synthesizer] for Rust vendor bundling.
 // Returns an empty slice when rust-vendor is not enabled.
-func synthesizeRustVendorFiles(
+func (s *RustVendorSynthesizer) SynthesizeSourceFiles(
 	component components.Component,
 	sourcesDir string,
 ) ([]projectconfig.SourceFileReference, error) {
