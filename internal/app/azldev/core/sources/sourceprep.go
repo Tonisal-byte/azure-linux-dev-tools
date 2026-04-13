@@ -18,6 +18,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources/synthesis"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
@@ -103,6 +104,17 @@ func WithAllowNoHashes() PreparerOption {
 	}
 }
 
+// WithSynthesizers returns a [PreparerOption] that registers source-file
+// synthesizers. Each [synthesis.Synthesizer] inspects the component
+// configuration and may produce additional [projectconfig.SourceFileReference]
+// entries (e.g., Rust vendor tarballs, Go module archives). Synthesized
+// entries are prepended to the component's SourceFiles before FetchFiles.
+func WithSynthesizers(synthesizers ...synthesis.Synthesizer) PreparerOption {
+	return func(p *sourcePreparerImpl) {
+		p.synthesizers = append(p.synthesizers, synthesizers...)
+	}
+}
+
 // Standard implementation of the [SourcePreparer] interface.
 type sourcePreparerImpl struct {
 	sourceManager sourceproviders.SourceManager
@@ -125,6 +137,11 @@ type sourcePreparerImpl struct {
 	// allowNoHashes, when true, allows source file references without hash
 	// values. Missing hashes are computed from the downloaded files.
 	allowNoHashes bool
+
+	// synthesizers is the set of registered source-file synthesizers.
+	// Each synthesizer may contribute additional SourceFileReference entries
+	// for a component (e.g., Rust vendor bundling, Go module vendoring).
+	synthesizers []synthesis.Synthesizer
 }
 
 // NewPreparer creates a new [SourcePreparer] instance. All positional arguments
@@ -192,19 +209,12 @@ func (p *sourcePreparerImpl) PrepareSources(
 			component.GetName(), err)
 	}
 
-	// Step 2: If rust-vendor is enabled, synthesize source-file entries and prepend them
-	// to the component's SourceFiles so FetchFiles processes them along with any
-	// user-defined entries. Synthesized entries come first so that user-defined
-	// source-files (processed later in iteration order) can override them.
-	vendorFiles, err := synthesizeRustVendorFiles(component, outputDir)
-	if err != nil {
-		return fmt.Errorf("failed to synthesize rust vendor files for component %#q:\n%w",
+	// Step 2: Run registered synthesizers to generate additional source-file entries
+	// (e.g., Rust vendor tarballs). Synthesized entries are prepended so that
+	// user-defined source-files (processed later in iteration order) can override them.
+	if err := p.runSynthesizers(component, outputDir); err != nil {
+		return fmt.Errorf("failed to synthesize source files for component %#q:\n%w",
 			component.GetName(), err)
-	}
-
-	if len(vendorFiles) > 0 {
-		cfg := component.GetConfig()
-		cfg.SourceFiles = append(vendorFiles, cfg.SourceFiles...)
 	}
 
 	// Step 3: Fetch source files (archives, patches, etc.) — including any synthesized
@@ -241,6 +251,26 @@ func (p *sourcePreparerImpl) PrepareSources(
 		if err := p.trySyntheticHistory(component, outputDir); err != nil {
 			return fmt.Errorf("failed to generate synthetic history for component %#q:\n%w",
 				component.GetName(), err)
+		}
+	}
+
+	return nil
+}
+
+// runSynthesizers invokes each registered [synthesis.Synthesizer] and prepends any
+// generated source-file entries to the component's SourceFiles.
+func (p *sourcePreparerImpl) runSynthesizers(
+	component components.Component, sourcesDir string,
+) error {
+	for _, s := range p.synthesizers {
+		files, err := s.SynthesizeSourceFiles(component, sourcesDir)
+		if err != nil {
+			return fmt.Errorf("source-file synthesizer failed:\n%w", err)
+		}
+
+		if len(files) > 0 {
+			cfg := component.GetConfig()
+			cfg.SourceFiles = append(files, cfg.SourceFiles...)
 		}
 	}
 

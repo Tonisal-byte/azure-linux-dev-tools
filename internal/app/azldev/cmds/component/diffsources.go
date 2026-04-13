@@ -13,6 +13,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/components"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
+	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources/synthesis"
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/workdir"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/dirdiff"
@@ -97,7 +98,10 @@ func DiffComponentSources(env *azldev.Env, options *DiffSourcesOptions) (interfa
 		return nil, fmt.Errorf("failed to create source manager:\n%w", err)
 	}
 
-	preparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env)
+	preparer, err := sources.NewPreparer(
+		sourceManager, env.FS(), env, env,
+		sources.WithSynthesizers(synthesis.DefaultSynthesizers()...),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create source preparer:\n%w", err)
 	}
