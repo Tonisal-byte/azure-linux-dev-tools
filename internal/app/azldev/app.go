@@ -155,6 +155,7 @@ lives), or use -C to point to one.`,
 
 	app.cmd.SetHelpCommandGroupID(CommandGroupMeta)
 	app.cmd.SetCompletionCommandGroupID(CommandGroupMeta)
+	app.addAdvancedCommandHint()
 
 	// Define global flags and configuration settings.
 	app.cmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "enable verbose output")
@@ -177,6 +178,18 @@ lives), or use -C to point to one.`,
 		false, "do not fail on unknown fields in TOML config files")
 
 	return app
+}
+
+// addAdvancedCommandHint embeds a hint about the hidden "advanced" command group
+// into the root command's usage template so that DisableExtraNewlines handles
+// trailing whitespace consistently.
+func (a *App) addAdvancedCommandHint() {
+	tmpl := a.cmd.UsageTemplate()
+	tmpl = strings.TrimSuffix(tmpl, "\n")
+	tmpl += `{{if not .HasParent}}
+Use "{{.CommandPath}} advanced --help" for additional tools (mock, mcp, wget).{{end}}
+`
+	a.cmd.SetUsageTemplate(tmpl)
 }
 
 // Returns the names of the app's commands. The optional provided list of ancestors
