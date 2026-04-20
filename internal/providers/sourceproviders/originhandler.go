@@ -12,7 +12,7 @@ import (
 )
 
 // originHandler is an interface for handling the acquisition of a source file based on its origin type.
-// Each origin type (download, cargo-vendor, rust2rpm) has a dedicated handler that encapsulates
+// Each origin type (download, rust2rpm) has a dedicated handler that encapsulates
 // the logic for producing the file at the destination path.
 type originHandler interface {
 	// Handle acquires or generates the source file described by fileRef, placing the result at destPath.
@@ -41,14 +41,6 @@ func (m *sourceManager) resolveOriginHandler(originType projectconfig.OriginType
 			lookasideDownloader: m.lookasideDownloader,
 		}, nil
 
-	case projectconfig.OriginTypeCargoVendor:
-		return &cargoVendorOriginHandler{
-			cmdFactory:    m.cmdFactory,
-			fs:            m.fs,
-			dryRunnable:   m.dryRunnable,
-			eventListener: m.eventListener,
-		}, nil
-
 	case projectconfig.OriginTypeRust2RPM:
 		return &rust2rpmOriginHandler{
 			cmdFactory:    m.cmdFactory,
@@ -66,12 +58,5 @@ func (m *sourceManager) resolveOriginHandler(originType projectconfig.OriginType
 // downloading them. Generative origins always regenerate their output, bypassing the
 // "already exists" early-return and lookaside cache checks.
 func isGenerativeOrigin(originType projectconfig.OriginType) bool {
-	switch originType {
-	case projectconfig.OriginTypeCargoVendor, projectconfig.OriginTypeRust2RPM:
-		return true
-	case projectconfig.OriginTypeURI:
-		return false
-	default:
-		return false
-	}
+	return (projectconfig.Origin{Type: originType}).IsGenerative()
 }

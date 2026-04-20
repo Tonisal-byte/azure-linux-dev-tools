@@ -327,6 +327,21 @@ func (m *sourceManager) fetchSourceFile(
 		return fmt.Errorf("origin handler failed for source file %#q:\n%w", fileRef.Filename, err)
 	}
 
+	// Back-fill the hash on generative origins so that downstream consumers
+	// (fingerprinting, dirty detection) see a deterministic content hash.
+	// Generative origins produce files at runtime and never carry
+	// pre-configured hashes; compute from the generated output on disk.
+	if isGenerativeOrigin(fileRef.Origin.Type) && fileRef.Hash == "" {
+		computedHash, hashErr := fileutils.ComputeFileHash(m.fs, fileutils.HashTypeSHA512, destPath)
+		if hashErr != nil {
+			return fmt.Errorf("failed to compute hash for generated source file %#q:\n%w",
+				fileRef.Filename, hashErr)
+		}
+
+		fileRef.Hash = computedHash
+		fileRef.HashType = fileutils.HashTypeSHA512
+	}
+
 	return nil
 }
 

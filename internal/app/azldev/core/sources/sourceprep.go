@@ -897,6 +897,20 @@ func (p *sourcePreparerImpl) processSourceRef(
 func (p *sourcePreparerImpl) resolveSourceHash(
 	ref projectconfig.SourceFileReference, componentName string, outputDir string,
 ) (hash string, hashType fileutils.HashType, err error) {
+	// Generative origins (cargo-vendor, rust2rpm) produce files at runtime and
+	// never carry pre-configured hashes. Always compute the hash from disk.
+	if ref.Origin.IsGenerative() {
+		filePath := filepath.Join(outputDir, ref.Filename)
+
+		computedHash, err := fileutils.ComputeFileHash(p.fs, fileutils.HashTypeSHA512, filePath)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to compute hash for generated source file %#q:\n%w",
+				ref.Filename, err)
+		}
+
+		return computedHash, fileutils.HashTypeSHA512, nil
+	}
+
 	hash = ref.Hash
 	hashType = ref.HashType
 

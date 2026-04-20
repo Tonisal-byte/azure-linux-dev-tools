@@ -149,6 +149,11 @@
           "$ref": "#/$defs/ComponentPublishConfig",
           "title": "Publish settings",
           "description": "Component-level publish channel settings"
+        },
+        "rust-vendor": {
+          "$ref": "#/$defs/RustVendorConfig",
+          "title": "Rust vendor",
+          "description": "Configuration for Rust vendor bundling"
         }
       },
       "additionalProperties": false,
@@ -691,7 +696,8 @@
         "type": {
           "type": "string",
           "enum": [
-            "download"
+            "download",
+            "rust2rpm"
           ],
           "title": "Origin type",
           "description": "Type of origin for this source file"
@@ -703,6 +709,11 @@
           "examples": [
             "https://example.com/source.tar.gz"
           ]
+        },
+        "crates-file": {
+          "type": "string",
+          "title": "Crates file",
+          "description": "Path to the .crate file relative to the sources directory (for rust2rpm origins)"
         }
       },
       "additionalProperties": false,
@@ -1092,6 +1103,25 @@
       "type": "object",
       "required": [
         "subrepos"
+      ]
+    },
+    "RustVendorConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enabled",
+          "description": "When true enables Rust vendor bundling for this component"
+        },
+        "crates-file": {
+          "type": "string",
+          "title": "Crates file",
+          "description": "Name of the .crates file relative to the sources directory. Auto-discovered when omitted."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "enabled"
       ]
     },
     "SourceFileReference": {

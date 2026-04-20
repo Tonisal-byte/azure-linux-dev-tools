@@ -255,6 +255,10 @@ func validateOrigin(origin Origin, filename string, componentName string) error 
 					"URI %#q is missing a scheme (e.g. 'https://')",
 				filename, componentName, origin.Uri)
 		}
+
+	case OriginTypeRust2RPM:
+		// Validated at runtime by the origin handler.
+
 	default:
 		return fmt.Errorf(
 			"unsupported 'origin' type %#q for source file %#q, component %#q",

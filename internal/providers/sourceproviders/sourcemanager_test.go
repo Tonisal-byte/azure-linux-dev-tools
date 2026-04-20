@@ -24,6 +24,7 @@ import (
 const (
 	testDestDir       = "/output"
 	testSourceTarball = "source.tar.gz"
+	rust2rpmCmd       = "rust2rpm"
 )
 
 // testDefaultDistro returns a [sourceproviders.ResolvedDistro] matching the test
@@ -556,4 +557,64 @@ func TestSourceManager_ResolveSourceIdentity_UnknownSourceType(t *testing.T) {
 	_, err = sourceManager.ResolveSourceIdentity(t.Context(), component)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no identity provider for source type")
+}
+
+func TestSourceManager_FetchFiles_GenerativeOriginBackfillsHash(t *testing.T) {
+	env := testutils.NewTestEnv(t)
+	ctrl := gomock.NewController(t)
+	component := components_testutils.NewMockComponent(ctrl)
+
+	require.NoError(t, env.TestFS.MkdirAll(testDestDir, fileperms.PrivateDir))
+
+	// Write a fake .crate file so the rust2rpm handler finds it.
+	cratesFilePath := filepath.Join(testDestDir, "test-component-1.0.crate")
+	require.NoError(t, fileutils.WriteFile(env.TestFS, cratesFilePath, []byte("fake crate"), fileperms.PrivateFile))
+
+	specContent := []byte("Name: test-component\nVersion: 1.0\nRelease: 1\n")
+
+	// Simulate rust2rpm writing a spec file when executed.
+	env.CmdFactory.RunHandler = func(cmd *exec.Cmd) error {
+		if len(cmd.Args) > 0 && cmd.Args[0] == rust2rpmCmd {
+			specPath := filepath.Join(testDestDir, "test-component.spec")
+
+			return fileutils.WriteFile(env.TestFS, specPath, specContent, fileperms.PrivateFile)
+		}
+
+		return nil
+	}
+
+	componentConfig := &projectconfig.ComponentConfig{
+		SourceFiles: []projectconfig.SourceFileReference{{
+			Filename: "test-component.spec",
+			Origin: projectconfig.Origin{
+				Type:       projectconfig.OriginTypeRust2RPM,
+				CratesFile: "test-component-1.0.crate",
+			},
+			// Hash intentionally left empty — generative origin.
+		}},
+	}
+
+	component.EXPECT().GetName().AnyTimes().Return("test-component")
+	component.EXPECT().GetConfig().AnyTimes().Return(componentConfig)
+
+	sourceManager, err := sourceproviders.NewSourceManager(env.Env, testDefaultDistro())
+	require.NoError(t, err)
+
+	err = sourceManager.FetchFiles(t.Context(), component, testDestDir)
+	require.NoError(t, err)
+
+	// Verify the spec file was created.
+	specExists, err := fileutils.Exists(env.TestFS, filepath.Join(testDestDir, "test-component.spec"))
+	require.NoError(t, err)
+	assert.True(t, specExists, "spec file should exist after rust2rpm handler ran")
+
+	// Verify hash was back-filled on the source file reference.
+	assert.NotEmpty(t, componentConfig.SourceFiles[0].Hash,
+		"hash should be back-filled on the SourceFileReference after generative origin runs")
+	assert.Equal(t, fileutils.HashTypeSHA512, componentConfig.SourceFiles[0].HashType,
+		"hash type should be set to SHA-512 for generated files")
+
+	// Verify the hash is a valid SHA-512 hex string (128 hex chars).
+	assert.Len(t, componentConfig.SourceFiles[0].Hash, 128,
+		"SHA-512 hash should be 128 hex characters")
 }
