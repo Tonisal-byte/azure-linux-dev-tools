@@ -64,11 +64,16 @@ type PreparerOption func(*sourcePreparerImpl)
 // Without this option, no dist-git is created and synthetic history is skipped.
 //
 // The defaultAuthorEmail is used for synthetic changelog entries and commits
-// when no author email is available from git history.
-func WithGitRepo(defaultAuthorEmail string) PreparerOption {
+// when no author email is available from git history. The cmdFactory is used
+// to shell out to git for fingerprint change detection.
+func WithGitRepo(
+	defaultAuthorEmail string,
+	cmdFactory opctx.CmdFactory,
+) PreparerOption {
 	return func(p *sourcePreparerImpl) {
 		p.withGitRepo = true
 		p.defaultAuthorEmail = defaultAuthorEmail
+		p.cmdFactory = cmdFactory
 	}
 }
 
@@ -121,6 +126,10 @@ type sourcePreparerImpl struct {
 	// defaultAuthorEmail is the email address used for synthetic changelog
 	// entries and commits when no author email is available from git history.
 	defaultAuthorEmail string
+
+	// cmdFactory is used to shell out to git for fingerprint change detection
+	// in the project repository. Set via [WithGitRepo].
+	cmdFactory opctx.CmdFactory
 
 	// allowNoHashes, when true, allows source file references without hash
 	// values. Missing hashes are computed from the downloaded files.
@@ -220,7 +229,7 @@ func (p *sourcePreparerImpl) PrepareSources(
 
 	// Record the changes as synthetic git history when dist-git creation is enabled.
 	if p.withGitRepo {
-		if err := p.trySyntheticHistory(component, outputDir); err != nil {
+		if err := p.trySyntheticHistory(ctx, component, outputDir); err != nil {
 			return fmt.Errorf("failed to generate synthetic history for component %#q:\n%w",
 				component.GetName(), err)
 		}
@@ -350,33 +359,38 @@ func initSourcesRepo(sourcesDirPath string) (*gogit.Repository, error) {
 }
 
 // trySyntheticHistory attempts to create synthetic git commits on top of the
-// component's sources directory. If no .git directory exists, one is initialized
-// with an initial commit so Affects commits can be layered on uniformly for all
-// component types.
+// component's sources directory. Synthetic commits are derived from lock file
+// fingerprint changes in the project repository and interleaved into the
+// upstream dist-git history. If no .git directory exists, one is initialized
+// with an initial commit so synthetic commits can be layered on uniformly.
 //
 // Returns a non-nil error if history generation fails.
 func (p *sourcePreparerImpl) trySyntheticHistory(
+	ctx context.Context,
 	component components.Component,
 	sourcesDirPath string,
 ) error {
 	config := component.GetConfig()
+	componentName := component.GetName()
 
-	// Build commit metadata from Affects commits.
-	commits, err := buildSyntheticCommits(config, component.GetName(), p.defaultAuthorEmail)
+	// Build commit metadata from lock file fingerprint changes.
+	changes, importCommit, err := buildSyntheticCommits(
+		ctx, p.cmdFactory, config, componentName, p.defaultAuthorEmail,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to build synthetic commits:\n%w", err)
 	}
 
-	if len(commits) == 0 {
+	if len(changes) == 0 {
 		slog.Debug("No synthetic commits to create; skipping history generation",
-			"component", component.GetName())
+			"component", componentName)
 
 		return nil
 	}
 
 	// Adjust the Release tag before staging changes. See [tryBumpStaticRelease]
 	// for the handling of %autorelease, static integers, and non-standard values.
-	if err := p.tryBumpStaticRelease(component, sourcesDirPath, len(commits)); err != nil {
+	if err := p.tryBumpStaticRelease(component, sourcesDirPath, len(changes)); err != nil {
 		return fmt.Errorf("failed to apply release bump:\n%w", err)
 	}
 
@@ -391,7 +405,7 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 
 	if os.IsNotExist(statErr) {
 		slog.Info("No .git directory in sources; initializing repository",
-			"component", component.GetName())
+			"component", componentName)
 
 		if _, err := initSourcesRepo(sourcesDirPath); err != nil {
 			return fmt.Errorf("failed to initialize sources repository:\n%w", err)
@@ -404,7 +418,7 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 		return fmt.Errorf("failed to open sources repository at %#q:\n%w", sourcesDirPath, err)
 	}
 
-	if err := CommitSyntheticHistory(sourcesRepo, commits); err != nil {
+	if err := CommitInterleavedHistory(sourcesRepo, changes, importCommit); err != nil {
 		return fmt.Errorf("failed to commit synthetic history:\n%w", err)
 	}
 

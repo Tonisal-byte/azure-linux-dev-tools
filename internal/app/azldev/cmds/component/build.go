@@ -253,7 +253,9 @@ func BuildComponent(
 
 	var preparerOpts []sources.PreparerOption
 	if options.WithGitRepo {
-		preparerOpts = append(preparerOpts, sources.WithGitRepo(env.Config().Project.DefaultAuthorEmail))
+		preparerOpts = append(preparerOpts, sources.WithGitRepo(
+			env.Config().Project.DefaultAuthorEmail, env,
+		))
 	}
 
 	sourcePreparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
