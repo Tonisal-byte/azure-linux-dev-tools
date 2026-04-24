@@ -63,16 +63,12 @@ type PreparerOption func(*sourcePreparerImpl)
 // requires the project configuration to reside inside a git repository.
 // Without this option, no dist-git is created and synthetic history is skipped.
 //
-// The defaultAuthorEmail is used for synthetic changelog entries and commits
-// when no author email is available from git history. The cmdFactory is used
-// to shell out to git for fingerprint change detection.
+// The cmdFactory is used to shell out to git for fingerprint change detection.
 func WithGitRepo(
-	defaultAuthorEmail string,
 	cmdFactory opctx.CmdFactory,
 ) PreparerOption {
 	return func(p *sourcePreparerImpl) {
 		p.withGitRepo = true
-		p.defaultAuthorEmail = defaultAuthorEmail
 		p.cmdFactory = cmdFactory
 	}
 }
@@ -122,10 +118,6 @@ type sourcePreparerImpl struct {
 	// skipLookaside, when true, skips all lookaside cache downloads during
 	// source preparation. Git-tracked files are still fetched.
 	skipLookaside bool
-
-	// defaultAuthorEmail is the email address used for synthetic changelog
-	// entries and commits when no author email is available from git history.
-	defaultAuthorEmail string
 
 	// cmdFactory is used to shell out to git for fingerprint change detection
 	// in the project repository. Set via [WithGitRepo].
@@ -375,7 +367,7 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 
 	// Build commit metadata from lock file fingerprint changes.
 	changes, importCommit, err := buildSyntheticCommits(
-		ctx, p.cmdFactory, config, componentName, p.defaultAuthorEmail,
+		ctx, p.cmdFactory, config, componentName,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to build synthetic commits:\n%w", err)
@@ -394,7 +386,6 @@ func (p *sourcePreparerImpl) trySyntheticHistory(
 		return fmt.Errorf("failed to apply release bump:\n%w", err)
 	}
 
-	// Use os.Stat (not p.fs) because go-git always operates on the real filesystem.
 	gitDirPath := filepath.Join(sourcesDirPath, ".git")
 
 	_, statErr := os.Stat(gitDirPath)
