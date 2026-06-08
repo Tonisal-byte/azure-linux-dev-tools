@@ -434,6 +434,87 @@ func TestProjectConfigFileValidation_UnsupportedOriginType(t *testing.T) {
 	assert.Contains(t, err.Error(), "ftp")
 }
 
+func TestProjectConfigFileValidation_CargoVendoredOriginValid(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Components: map[string]projectconfig.ComponentConfig{
+			"test-component": {
+				SourceFiles: []projectconfig.SourceFileReference{
+					{
+						Filename: "vendor.tar.gz",
+						Origin: projectconfig.Origin{
+							Type:   projectconfig.OriginTypeCargoVendored,
+							Source: "my-crate-1.0.crate",
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.NoError(t, file.Validate())
+}
+
+func TestProjectConfigFileValidation_CargoVendoredOriginValidXZ(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Components: map[string]projectconfig.ComponentConfig{
+			"test-component": {
+				SourceFiles: []projectconfig.SourceFileReference{
+					{
+						Filename: "vendor.tar.xz",
+						Origin: projectconfig.Origin{
+							Type:   projectconfig.OriginTypeCargoVendored,
+							Source: "my-crate-1.0.crate",
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.NoError(t, file.Validate())
+}
+
+func TestProjectConfigFileValidation_CargoVendoredOriginInvalidExtension(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Components: map[string]projectconfig.ComponentConfig{
+			"test-component": {
+				SourceFiles: []projectconfig.SourceFileReference{
+					{
+						Filename: "vendor.zip",
+						Origin: projectconfig.Origin{
+							Type:   projectconfig.OriginTypeCargoVendored,
+							Source: "my-crate-1.0.crate",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := file.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cargo-vendored")
+	assert.Contains(t, err.Error(), "supported archive extension")
+	assert.Contains(t, err.Error(), "vendor.zip")
+}
+
+func TestProjectConfigFileValidation_CargoVendoredOriginMissingSource(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Components: map[string]projectconfig.ComponentConfig{
+			"test-component": {
+				SourceFiles: []projectconfig.SourceFileReference{
+					{
+						Filename: "vendor.tar.gz",
+						Origin:   projectconfig.Origin{Type: projectconfig.OriginTypeCargoVendored},
+					},
+				},
+			},
+		},
+	}
+	err := file.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing 'source'")
+	assert.Contains(t, err.Error(), "vendor.tar.gz")
+	assert.Contains(t, err.Error(), "test-component")
+}
+
 func TestProjectConfigFileValidation_PerComponentSnapshotDisallowed(t *testing.T) {
 	file := projectconfig.ConfigFile{
 		Components: map[string]projectconfig.ComponentConfig{

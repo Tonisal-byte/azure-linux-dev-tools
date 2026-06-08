@@ -97,8 +97,12 @@ func ComputeIdentity(
 
 	// 2. Verify all source files have a hash. Without a hash the fingerprint
 	//    cannot detect content changes, so we refuse to compute one.
+	//    Generated origins (e.g., 'cargo-vendored') are exempt when their
+	//    hash has not been resolved yet — during render the file is never
+	//    produced and the hash is intentionally absent.
 	for i := range component.SourceFiles {
-		if component.SourceFiles[i].Hash == "" {
+		if component.SourceFiles[i].Hash == "" &&
+			!component.SourceFiles[i].Origin.Type.IsGenerated() {
 			return nil, fmt.Errorf(
 				"source file %#q has no hash; cannot compute a deterministic fingerprint",
 				component.SourceFiles[i].Filename,

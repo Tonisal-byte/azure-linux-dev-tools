@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
+	"github.com/microsoft/azure-linux-dev-tools/internal/utils/archive"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileperms"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 	"github.com/pelletier/go-toml/v2"
@@ -255,6 +256,37 @@ func validateOrigin(origin Origin, filename string, componentName string) error 
 					"URI %#q is missing a scheme (e.g. 'https://')",
 				filename, componentName, origin.Uri)
 		}
+
+	case OriginTypeCargoVendored:
+		if _, err := archive.DetectCompression(filename); err != nil {
+			return fmt.Errorf(
+				"source file %#q for component %#q with origin type 'cargo-vendored' "+
+					"must use a supported archive extension (.tar.gz, .tar.xz, .tar.zst, .tar):\n%w",
+				filename, componentName, err)
+		}
+
+		if origin.Source == "" {
+			return fmt.Errorf(
+				"missing 'source' for source file %#q, component %#q; "+
+					"'source' is required when 'origin' type is 'cargo-vendored' "+
+					"(set it to the filename of the crate or source archive containing 'Cargo.toml')",
+				filename, componentName)
+		}
+
+		if err := fileutils.ValidateFilename(origin.Source); err != nil {
+			return fmt.Errorf(
+				"invalid 'source' filename %#q for source file %#q, component %#q:\n%w",
+				origin.Source, filename, componentName, err)
+		}
+
+		for _, patch := range origin.Patches {
+			if err := fileutils.ValidateFilename(patch); err != nil {
+				return fmt.Errorf(
+					"invalid patch filename %#q in 'origin.patches' for source file %#q, component %#q:\n%w",
+					patch, filename, componentName, err)
+			}
+		}
+
 	default:
 		return fmt.Errorf(
 			"unsupported 'origin' type %#q for source file %#q, component %#q",

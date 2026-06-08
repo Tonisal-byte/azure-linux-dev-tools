@@ -140,8 +140,11 @@ func (g *FedoraSourcesProviderImpl) GetComponent(
 		return fmt.Errorf("failed to clone git repository %#q:\n%w", gitRepoURL, err)
 	}
 
-	// Collect filenames from source-files config so the lookaside extractor can skip them.
-	// These files were already fetched by FetchFiles and take precedence over upstream versions.
+	// Collect filenames from source-files config so the lookaside extractor
+	// can skip them. FetchFiles runs after FetchComponent, so these files are
+	// not yet on disk, but we still skip their lookaside download because
+	// FetchFiles will place them (or generate them) with the user-configured
+	// origin, which should take precedence over the upstream version.
 	sourceFiles := component.GetConfig().SourceFiles
 
 	skipFileNames := make([]string, len(sourceFiles))

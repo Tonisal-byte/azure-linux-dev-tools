@@ -15,6 +15,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders/fedorasource"
+	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders/originhandlers"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/downloader"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/git"
@@ -310,12 +311,23 @@ func (m *sourceManager) fetchSourceFile(
 		return fmt.Errorf("failed to check existence of destination file %#q:\n%w", destPath, err)
 	}
 
-	if sourceExists {
+	if sourceExists && !fileRef.ReplaceUpstream {
 		slog.Debug("Source file already exists, skipping download",
 			"filename", fileRef.Filename,
 			"path", destPath)
 
 		return nil
+	}
+
+	if sourceExists && fileRef.ReplaceUpstream {
+		slog.Info("Replacing existing source file (replace-upstream is set)",
+			"filename", fileRef.Filename,
+			"reason", fileRef.ReplaceReason)
+
+		if err := m.fs.Remove(destPath); err != nil {
+			return fmt.Errorf("failed to remove existing source file %#q for replacement:\n%w",
+				destPath, err)
+		}
 	}
 
 	// Phase 1: Try lookaside cache if hash info is available
@@ -377,36 +389,43 @@ func (m *sourceManager) tryLookasideDownload(
 	return nil
 }
 
-// downloadFromOrigin downloads a source file using its configured origin.
+// buildOriginHandlers returns a map from [projectconfig.OriginType] to its
+// [originhandlers.Handler]. The httpDownloader is captured by handlers that
+// need HTTP access; handlers that generate files locally ignore it.
+func (m *sourceManager) buildOriginHandlers(
+	httpDownloader downloader.Downloader,
+) map[projectconfig.OriginType]originhandlers.Handler {
+	downloadFn := func(
+		ctx context.Context,
+		sourceURL string,
+		destPath string,
+		fileRef *projectconfig.SourceFileReference,
+	) error {
+		return m.downloadAndValidate(
+			ctx, httpDownloader, sourceURL, destPath, fileRef)
+	}
+
+	return map[projectconfig.OriginType]originhandlers.Handler{
+		projectconfig.OriginTypeURI:           originhandlers.NewURIHandler(downloadFn),
+		projectconfig.OriginTypeCargoVendored: originhandlers.NewCargoVendoredHandler(m.cmdFactory),
+	}
+}
+
+// downloadFromOrigin resolves a source file using the [originhandlers.Handler]
+// registered for the file's [projectconfig.OriginType].
 func (m *sourceManager) downloadFromOrigin(
 	ctx context.Context,
 	httpDownloader downloader.Downloader,
 	fileRef *projectconfig.SourceFileReference,
 	destPath string,
 ) error {
-	switch fileRef.Origin.Type {
-	case projectconfig.OriginTypeURI:
-		if fileRef.Origin.Uri == "" {
-			return fmt.Errorf("no URI configured for source file %#q with origin type %#q",
-				fileRef.Filename, fileRef.Origin.Type)
-		}
-
-		slog.Info("Downloading source file from origin URL...",
-			"filename", fileRef.Filename,
-			"origin", fileRef.Origin.Uri,
-			"destination", destPath)
-
-		err := m.downloadAndValidate(ctx, httpDownloader, fileRef.Origin.Uri, destPath, fileRef)
-		if err != nil {
-			return fmt.Errorf("failed to retrieve source file %#q:\n%w", fileRef.Filename, err)
-		}
-
-		return nil
-
-	default:
+	handler, ok := m.buildOriginHandlers(httpDownloader)[fileRef.Origin.Type]
+	if !ok {
 		return fmt.Errorf("unsupported origin type %#q for source file %#q",
 			fileRef.Origin.Type, fileRef.Filename)
 	}
+
+	return handler(ctx, fileRef, destPath)
 }
 
 // downloadAndValidate downloads a file from the given URL with retries, optionally

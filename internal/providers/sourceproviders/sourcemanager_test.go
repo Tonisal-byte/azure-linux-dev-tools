@@ -371,6 +371,97 @@ func TestSourceManager_FetchFiles_Errors(t *testing.T) {
 	}
 }
 
+func TestSourceManager_FetchFiles_CargoVendored_CargoNotInPath(t *testing.T) {
+	env := testutils.NewTestEnv(t)
+	ctrl := gomock.NewController(t)
+	component := components_testutils.NewMockComponent(ctrl)
+
+	require.NoError(t, env.TestFS.MkdirAll(testDestDir, fileperms.PrivateDir))
+
+	componentConfig := &projectconfig.ComponentConfig{
+		SourceFiles: []projectconfig.SourceFileReference{{
+			Filename: "vendor.tar.gz",
+			Origin: projectconfig.Origin{
+				Type:   projectconfig.OriginTypeCargoVendored,
+				Source: "my-crate-1.0.crate",
+			},
+		}},
+	}
+
+	component.EXPECT().GetName().AnyTimes().Return("test-component")
+	component.EXPECT().GetConfig().AnyTimes().Return(componentConfig)
+
+	// Do NOT register "cargo" in the search path.
+
+	sourceManager, err := sourceproviders.NewSourceManager(env.Env, testDefaultDistro())
+	require.NoError(t, err)
+
+	err = sourceManager.FetchFiles(t.Context(), component, testDestDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "'cargo' is not available in PATH")
+}
+
+func TestSourceManager_FetchFiles_CargoVendored_SourceArchiveMissing(t *testing.T) {
+	env := testutils.NewTestEnv(t)
+	ctrl := gomock.NewController(t)
+	component := components_testutils.NewMockComponent(ctrl)
+
+	require.NoError(t, env.TestFS.MkdirAll(testDestDir, fileperms.PrivateDir))
+
+	componentConfig := &projectconfig.ComponentConfig{
+		SourceFiles: []projectconfig.SourceFileReference{{
+			Filename: "vendor.tar.gz",
+			Origin: projectconfig.Origin{
+				Type:   projectconfig.OriginTypeCargoVendored,
+				Source: "nonexistent.crate",
+			},
+		}},
+	}
+
+	component.EXPECT().GetName().AnyTimes().Return("test-component")
+	component.EXPECT().GetConfig().AnyTimes().Return(componentConfig)
+
+	env.CmdFactory.RegisterCommandInSearchPath("cargo")
+
+	sourceManager, err := sourceproviders.NewSourceManager(env.Env, testDefaultDistro())
+	require.NoError(t, err)
+
+	err = sourceManager.FetchFiles(t.Context(), component, testDestDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to extract source archive")
+}
+
+func TestSourceManager_FetchFiles_CargoVendored_ExistingFileSkipped(t *testing.T) {
+	env := testutils.NewTestEnv(t)
+	ctrl := gomock.NewController(t)
+	component := components_testutils.NewMockComponent(ctrl)
+
+	require.NoError(t, env.TestFS.MkdirAll(testDestDir, fileperms.PrivateDir))
+
+	destPath := filepath.Join(testDestDir, "vendor.tar.gz")
+	require.NoError(t, fileutils.WriteFile(env.TestFS, destPath, []byte("existing tarball"), fileperms.PrivateFile))
+
+	componentConfig := &projectconfig.ComponentConfig{
+		SourceFiles: []projectconfig.SourceFileReference{{
+			Filename: "vendor.tar.gz",
+			Origin: projectconfig.Origin{
+				Type:   projectconfig.OriginTypeCargoVendored,
+				Source: "my-crate-1.0.crate",
+			},
+		}},
+	}
+
+	component.EXPECT().GetName().AnyTimes().Return("test-component")
+	component.EXPECT().GetConfig().AnyTimes().Return(componentConfig)
+
+	sourceManager, err := sourceproviders.NewSourceManager(env.Env, testDefaultDistro())
+	require.NoError(t, err)
+
+	// Should succeed without calling cargo because the file already exists.
+	err = sourceManager.FetchFiles(t.Context(), component, testDestDir)
+	require.NoError(t, err)
+}
+
 func TestSourceManager_ResolveSourceIdentity_EmptyComponentName(t *testing.T) {
 	env := testutils.NewTestEnv(t)
 	ctrl := gomock.NewController(t)

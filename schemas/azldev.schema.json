@@ -691,7 +691,8 @@
         "type": {
           "type": "string",
           "enum": [
-            "download"
+            "download",
+            "cargo-vendored"
           ],
           "title": "Origin type",
           "description": "Type of origin for this source file"
@@ -702,6 +703,14 @@
           "description": "URI to download the source file from if origin type is 'download'",
           "examples": [
             "https://example.com/source.tar.gz"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "title": "Source archive",
+          "description": "Filename of the source archive containing the manifest (e.g. Cargo.toml) used by this origin handler. Required for 'cargo-vendored'.",
+          "examples": [
+            "my-crate-1.0.crate"
           ]
         }
       },

@@ -318,8 +318,9 @@ The `origin` field specifies how to obtain the source file.
 
 | Field | TOML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
-| Type | `type` | string | **Yes** | Origin type. Currently only `"download"` is supported. |
+| Type | `type` | string | **Yes** | Origin type: `"download"` (fetch from a URI) or `"cargo-vendored"` (generate a vendor tarball via `cargo vendor`). |
 | URI | `uri` | string | No | URI to download the file from (required when type is `"download"`) |
+| Source | `source` | string | No | Filename of the source archive containing the manifest needed by this origin handler (required when type is `"cargo-vendored"`). The archive must already be present in the source directory (e.g., fetched from the lookaside cache). |
 
 ### Example
 
@@ -335,6 +336,31 @@ filename = "shimaa64.efi"
 hash = "57aa116d1c91a9ec36ab8b46c9164ae19af192b..."
 hash-type = "SHA512"
 origin = { type = "download", uri = "https://example.com/repo/pkgs/shim/shimaa64.efi/sha512/.../shimaa64.efi" }
+```
+
+### Cargo vendor origin
+
+For Rust components that need a vendored crate tarball, use the `"cargo-vendored"` origin type.
+The `source` field names the crate or source archive (already present from the lookaside cache)
+that contains `Cargo.toml`. azldev extracts that archive, runs
+`cargo vendor --manifest-path <extracted>/Cargo.toml`, and archives the resulting `vendor/`
+directory into the specified filename. The output compression format is inferred from the
+filename extension (`.tar.gz`, `.tar.xz`, `.tar.zst`, or `.tar`). The `.crate` extension
+is also recognised as gzip-compressed tar for the source archive.
+
+The generated tarball contains a top-level `vendor/` directory, matching the convention
+used by Fedora and Azure Linux specs (consumed via `%cargo_prep -v vendor`).
+
+> **Prerequisites:**
+> - `cargo` must be available in `PATH`.
+> - The source archive named in `source` must be present in the source directory before
+>   the vendor tarball is generated. For upstream components this happens automatically
+>   via the lookaside cache download in `FetchComponent`.
+
+```toml
+[[components.my-rust-pkg.source-files]]
+filename = "my-rust-pkg-1.0-vendor.tar.xz"
+origin = { type = "cargo-vendored", source = "my-rust-pkg-1.0.crate" }
 ```
 
 ### Replacing an upstream `sources` entry

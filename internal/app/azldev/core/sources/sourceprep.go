@@ -215,17 +215,6 @@ func NewPreparer(
 func (p *sourcePreparerImpl) PrepareSources(
 	ctx context.Context, component components.Component, outputDir string, applyOverlays bool,
 ) error {
-	// Use the source manager to fetch source files (archives, patches, etc.)
-	// Skip this step when skipLookaside is set — source tarballs are not needed
-	// for rendering and are the most expensive download.
-	if !p.skipLookaside {
-		err := p.sourceManager.FetchFiles(ctx, component, outputDir)
-		if err != nil {
-			return fmt.Errorf("failed to fetch source files for component %#q:\n%w",
-				component.GetName(), err)
-		}
-	}
-
 	// Preserve the upstream .git directory only when dist-git creation is
 	// requested via --with-git. This is required so that overlay commits can be
 	// appended on top of the upstream commit log during synthetic history generation.
@@ -238,11 +227,29 @@ func (p *sourcePreparerImpl) PrepareSources(
 		fetchOpts = append(fetchOpts, sourceproviders.WithSkipLookaside())
 	}
 
-	// Use the source manager to fetch the component (spec file and sidecar files).
+	// Use the source manager to fetch the component (spec file, sidecar files,
+	// and lookaside tarballs such as crate sources). This must run before
+	// FetchFiles so that origin handlers (e.g., 'cargo-vendored') can rely on
+	// upstream files like 'Cargo.toml' already being present.
 	err := p.sourceManager.FetchComponent(ctx, component, outputDir, fetchOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to fetch sources for component %#q:\n%w",
 			component.GetName(), err)
+	}
+
+	// Use the source manager to fetch user-configured source files (archives,
+	// patches, generated tarballs, etc.). This runs after FetchComponent so
+	// that generated origins like 'cargo-vendored' can access upstream files
+	// already placed in outputDir. Files with 'replace-upstream' overwrite any
+	// same-named upstream file; other source-files skip if already present.
+	// Skip this step when skipLookaside is set — source tarballs are not needed
+	// for rendering and are the most expensive download.
+	if !p.skipLookaside {
+		err := p.sourceManager.FetchFiles(ctx, component, outputDir)
+		if err != nil {
+			return fmt.Errorf("failed to fetch source files for component %#q:\n%w",
+				component.GetName(), err)
+		}
 	}
 
 	if applyOverlays {
@@ -652,6 +659,20 @@ func (p *sourcePreparerImpl) updateSourcesFile(component components.Component, o
 		return err
 	}
 
+	// Write computed hashes back into the component config so that downstream
+	// consumers (e.g., fingerprinting) can see them. Generated origins like
+	// 'cargo-vendored' never have a pre-computed hash — the hash is resolved
+	// during buildSourceEntries and must be persisted here.
+	for i := range sourceFiles {
+		if sourceFiles[i].Hash == "" && (!p.skipLookaside || !sourceFiles[i].Origin.Type.IsGenerated()) {
+			hash, hashType, hashErr := p.resolveSourceHash(sourceFiles[i], component.GetName(), outputDir)
+			if hashErr == nil {
+				component.GetConfig().SourceFiles[i].Hash = hash
+				component.GetConfig().SourceFiles[i].HashType = hashType
+			}
+		}
+	}
+
 	newContent := strings.Join(mergedLines, "\n") + "\n"
 
 	if err := fileutils.WriteFile(
@@ -725,6 +746,17 @@ func (p *sourcePreparerImpl) buildSourceEntries(
 	appendLines := make([]string, 0, len(sourceFiles))
 
 	for _, ref := range sourceFiles {
+		// Generated source files (e.g., 'cargo-vendored') are skipped when
+		// skipLookaside is set because the file was never produced — there
+		// is nothing on disk to hash for a 'sources' entry.
+		if p.skipLookaside && ref.Origin.Type.IsGenerated() {
+			slog.Debug("Skipping generated source file (lookaside downloads skipped)",
+				"filename", ref.Filename,
+				"originType", ref.Origin.Type)
+
+			continue
+		}
+
 		formatted, isReplacement, err := p.processSourceRef(ref, existingByName, componentName, outputDir)
 		if err != nil {
 			return nil, err
@@ -865,8 +897,9 @@ func (p *sourcePreparerImpl) resolveSourceHash(
 		return hash, hashType, nil
 	}
 
-	// Hash is empty — resolve it if '--allow-no-hashes' is set.
-	if !p.allowNoHashes {
+	// Hash is empty — resolve it if the origin generates files at build time
+	// or if '--allow-no-hashes' is set.
+	if !p.allowNoHashes && !ref.Origin.Type.IsGenerated() {
 		return "", "", fmt.Errorf(
 			"source file %#q is missing required 'hash'; specify the hash in the "+
 				"'source-files' configuration or use '--allow-no-hashes' to compute it automatically",
