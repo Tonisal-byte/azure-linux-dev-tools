@@ -11,6 +11,9 @@
 // are not policed by [os.Root]; this package additionally rejects any symlink
 // whose target is non-local via [filepath.IsLocal].
 //
+// To prevent archive bombs, [Extract] also limits the decompressed total size
+// of regular-file entries and the number of archive entries it processes.
+//
 // Archive creation is designed for reproducible builds: file ordering is
 // lexicographic, timestamps are pinned to Unix epoch, and owner/group metadata
 // is zeroed out. This matches the
@@ -50,16 +53,23 @@ const (
 	CompressionZstd
 )
 
-// maxEntryBytes caps the decompressed size of any single regular-file entry
-// extracted by [Extract]. This prevents a decompression-bomb archive from
-// filling the destination filesystem. 10 GiB is well above any reasonable
-// source archive entry but small enough to refuse pathological inputs.
+// Extraction limits prevent malicious archives from exhausting destination
+// disk space or inodes. The per-entry and aggregate byte limits apply to
+// regular-file entries; the entry limit applies to every archive entry.
 //
-// Declared as var rather than const so internal tests can override it
-// without having to construct a >10 GiB fixture.
+// 10 GiB is well above any reasonable source archive entry, and 100 GiB or
+// 100,000 entries accommodates normal source archives while refusing
+// pathological inputs.
+//
+// Declared as vars rather than constants so internal tests can override them
+// without having to construct large fixtures.
 //
 //nolint:gochecknoglobals // see comment above
-var maxEntryBytes int64 = 10 << 30
+var (
+	maxEntryBytes int64 = 10 << 30
+	maxTotalBytes int64 = 100 << 30
+	maxEntries          = 100_000
+)
 
 // DetectCompression determines the compression type from the archive filename.
 func DetectCompression(filename string) (Compression, error) {
@@ -84,7 +94,8 @@ func DetectCompression(filename string) (Compression, error) {
 // other entry types are skipped. Entry paths are confined to destDir via
 // [os.Root]: any path that would escape destDir is rejected by the runtime.
 // Symlink targets are validated separately by this package — see the package
-// doc for details.
+// doc for details. It also rejects archives that exceed the package limits for
+// regular-file bytes or total entry count.
 func Extract(archivePath, destDir string, comp Compression) (err error) {
 	if err := os.MkdirAll(destDir, fileperms.PublicDir); err != nil {
 		return fmt.Errorf("creating destination %#q:\n%w", destDir, err)
@@ -113,6 +124,11 @@ func Extract(archivePath, destDir string, comp Compression) (err error) {
 
 	tarReader := tar.NewReader(decompressed)
 
+	var (
+		extractedBytes int64
+		entryCount     int
+	)
+
 	for {
 		header, readErr := tarReader.Next()
 		if errors.Is(readErr, io.EOF) {
@@ -121,6 +137,24 @@ func Extract(archivePath, destDir string, comp Compression) (err error) {
 
 		if readErr != nil {
 			return fmt.Errorf("reading tar entry from %#q:\n%w", archivePath, readErr)
+		}
+
+		entryCount++
+		if entryCount > maxEntries {
+			return fmt.Errorf("archive contains more than %d entries", maxEntries)
+		}
+
+		if header.Typeflag == tar.TypeReg {
+			if header.Size < 0 || header.Size > maxTotalBytes || extractedBytes > maxTotalBytes-header.Size {
+				return fmt.Errorf(
+					"tar entry %#q would exceed total extraction limit of %d bytes (%d bytes already extracted)",
+					header.Name,
+					maxTotalBytes,
+					extractedBytes,
+				)
+			}
+
+			extractedBytes += header.Size
 		}
 
 		if err := extractEntry(root, header, tarReader); err != nil {
@@ -239,7 +273,7 @@ func extractEntry(root *os.Root, header *tar.Header, tarReader io.Reader) error 
 	name := header.Name
 
 	if header.Typeflag == tar.TypeDir {
-		if err := root.MkdirAll(name, fileperms.PublicDir); err != nil {
+		if err := root.MkdirAll(filepath.Clean(name), fileperms.PublicDir); err != nil {
 			return fmt.Errorf("creating directory %#q:\n%w", name, err)
 		}
 
