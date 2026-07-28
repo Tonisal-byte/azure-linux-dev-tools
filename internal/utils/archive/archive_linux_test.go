@@ -53,3 +53,24 @@ func TestExtract_PreservesModesUnderRestrictiveUmask(t *testing.T) {
 	restrictive := repack("restrictive", 0o077)
 	assert.Equal(t, standard, restrictive, "repacked archive must not depend on the process umask")
 }
+
+func TestExtract_ImplicitDirectorySymlinkAliasDoesNotOverrideExplicitMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	archivePath := filepath.Join(tmpDir, "source.tar.gz")
+	extractDir := filepath.Join(tmpDir, "extracted")
+
+	createTestTarGz(t, archivePath, []testTarEntry{
+		{name: "real/", typeflag: tar.TypeDir, mode: 0o700},
+		{name: "x", typeflag: tar.TypeSymlink, linkname: "real"},
+		{name: "x/subdir/file", typeflag: tar.TypeReg, content: "content"},
+		{name: "real/subdir/", typeflag: tar.TypeDir, mode: 0o700},
+	})
+
+	require.NoError(t, archive.Extract(archivePath, extractDir, archive.CompressionGzip))
+
+	for _, path := range []string{"real/subdir", "x/subdir"} {
+		info, err := os.Stat(filepath.Join(extractDir, path))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm(), "directory %#q mode", path)
+	}
+}

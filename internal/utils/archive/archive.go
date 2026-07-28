@@ -374,7 +374,7 @@ func extractEntry(root *os.Root, header *tar.Header, tarReader io.Reader, cfg ex
 
 		directoryMode := os.FileMode(header.Mode) & os.ModePerm //nolint:gosec // mask tar mode to permission bits
 
-		if err := ensureDirectory(root, directoryName, cfg.directoryModes); err != nil {
+		if err := ensureDirectory(root, directoryName); err != nil {
 			return fmt.Errorf("creating directory %#q:\n%w", name, err)
 		}
 
@@ -383,7 +383,7 @@ func extractEntry(root *os.Root, header *tar.Header, tarReader io.Reader, cfg ex
 		return nil
 	}
 
-	if err := ensureDirectory(root, filepath.Dir(name), cfg.directoryModes); err != nil {
+	if err := ensureDirectory(root, filepath.Dir(name)); err != nil {
 		return fmt.Errorf("creating parent for %#q:\n%w", name, err)
 	}
 
@@ -423,11 +423,12 @@ func extractEntry(root *os.Root, header *tar.Header, tarReader io.Reader, cfg ex
 	}
 }
 
-// ensureDirectory creates name and records a deterministic mode for every
+// ensureDirectory creates name and applies a deterministic mode to every
 // implicit parent it materializes. MkdirAll applies the process umask, so the
-// recorded modes must be restored after extraction just like explicit tar
-// directory entries. A later explicit entry overwrites the default mode.
-func ensureDirectory(root *os.Root, name string, directoryModes map[string]os.FileMode) error {
+// mode is restored immediately instead of being deferred with explicitly
+// archived directory modes. This avoids applying a default mode through a
+// symlink alias after an explicit directory entry has restored its own mode.
+func ensureDirectory(root *os.Root, name string) error {
 	name = filepath.Clean(name)
 	if name == "." {
 		return nil
@@ -449,8 +450,13 @@ func ensureDirectory(root *os.Root, name string, directoryModes map[string]os.Fi
 		return fmt.Errorf("materializing directory %#q:\n%w", name, err)
 	}
 
-	for _, path := range missingPaths {
-		directoryModes[path] = fileperms.PublicDir
+	// Set parents before children. A restrictive umask can otherwise make a
+	// newly-created parent untraversable before its child is chmodded.
+	for idx := len(missingPaths) - 1; idx >= 0; idx-- {
+		path := missingPaths[idx]
+		if err := root.Chmod(path, fileperms.PublicDir); err != nil {
+			return fmt.Errorf("setting permissions on implicit directory %#q:\n%w", path, err)
+		}
 	}
 
 	return nil
