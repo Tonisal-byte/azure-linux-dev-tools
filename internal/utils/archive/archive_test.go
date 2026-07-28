@@ -262,7 +262,7 @@ func TestCreateDeterministicArchive_ZstdIndependentOfGOMAXPROCS(t *testing.T) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(sourceDir, "content.bin"),
 		bytes.Repeat([]byte("deterministic content\n"), 64*1024),
-		0o644,
+		0o600,
 	))
 
 	create := func(name string, maxProcs int) []byte {
