@@ -144,6 +144,16 @@ var skills = []Skill{
 			"NG. Triggers include image build, image boot, kiwi, container image, VM image, images.toml.",
 		bodyTemplate: "image.md.tmpl",
 	},
+	{
+		Name: "azldev-overlay-metadata",
+		Description: "Read this before adding or reviewing an overlay `metadata` table; do not guess the " +
+			"category or upstream status from memory. Explains the overlay metadata schema that documents " +
+			"why an overlay exists and when it can be dropped, covering the required category and " +
+			"upstream-status values, commit/bug URL references, and the per-file overlay metadata block. " +
+			"Triggers include overlay metadata, category, upstream-status, upstream-backport, " +
+			"azl-pruning, azl-branding-policy, needs-upstream-hook, why overlay.",
+		bodyTemplate: "overlay-metadata.md.tmpl",
+	},
 }
 
 // Skills returns the registered skills in emission order.
@@ -235,6 +245,7 @@ var instructions = []Instruction{
 			{Skill: "azldev-comp-toml", Purpose: "for the component TOML format and review checklist"},
 			{Skill: "azldev-add-component", Purpose: "to add a new component"},
 			{Skill: "azldev-overlays", Purpose: "to add or change overlays"},
+			{Skill: "azldev-overlay-metadata", Purpose: "to annotate an overlay's category and upstream status"},
 			{Skill: "azldev-update-component", Purpose: "to refresh a component's lock"},
 			{Skill: "azldev-remove-component", Purpose: "to remove a component"},
 		},

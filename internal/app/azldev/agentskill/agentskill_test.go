@@ -80,6 +80,22 @@ func TestSkillDocumentUnknown(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestOverlayMetadataSkillDocument(t *testing.T) {
+	params := testParams()
+	params.Bindings = agentskill.Bindings{RenderedSpecsDir: "build/specs"}
+
+	doc, err := agentskill.SkillDocument("azldev-overlay-metadata", params)
+	require.NoError(t, err)
+
+	fields := parseFrontmatter(t, doc)
+	assert.Equal(t, "azldev-overlay-metadata", fields["name"])
+
+	// A distinctive, validated phrase from the skill body.
+	assert.Contains(t, doc, "One `[metadata]` block = one logical change")
+	// The verify step substitutes the resolved rendered-specs binding.
+	assert.Contains(t, doc, "git diff build/specs/")
+}
+
 func TestSkillDocumentUsesBindings(t *testing.T) {
 	params := testParams()
 	params.Bindings = agentskill.Bindings{
@@ -201,6 +217,7 @@ func TestSkillsRegistry(t *testing.T) {
 	assert.Contains(t, names, "azldev-add-component")
 	assert.Contains(t, names, "azldev-build-component")
 	assert.Contains(t, names, "azldev-image")
+	assert.Contains(t, names, "azldev-overlay-metadata")
 }
 
 func TestRegistryAccessorsReturnCopies(t *testing.T) {
@@ -372,6 +389,29 @@ func TestOverlaysSkillCoversSchemaEnums(t *testing.T) {
 		for _, value := range schemaEnum(t, schemaField.structType, schemaField.fieldName) {
 			assert.Containsf(t, doc, "`"+value+"`",
 				"azldev-overlays skill must document %s.%s value %q",
+				schemaField.structType.Name(), schemaField.fieldName, value)
+		}
+	}
+}
+
+// TestOverlayMetadataSkillCoversSchemaEnums is a drift guard: the azldev-overlay-metadata
+// skill must document every metadata category and upstream status defined in code.
+func TestOverlayMetadataSkillCoversSchemaEnums(t *testing.T) {
+	doc, err := agentskill.SkillDocument("azldev-overlay-metadata", agentskill.Params{})
+	require.NoError(t, err)
+
+	schemaFields := []struct {
+		structType reflect.Type
+		fieldName  string
+	}{
+		{reflect.TypeOf(projectconfig.OverlayMetadata{}), "Category"},
+		{reflect.TypeOf(projectconfig.OverlayMetadata{}), "UpstreamStatus"},
+	}
+
+	for _, schemaField := range schemaFields {
+		for _, value := range schemaEnum(t, schemaField.structType, schemaField.fieldName) {
+			assert.Containsf(t, doc, "`"+value+"`",
+				"azldev-overlay-metadata skill must document %s.%s value %q",
 				schemaField.structType.Name(), schemaField.fieldName, value)
 		}
 	}
