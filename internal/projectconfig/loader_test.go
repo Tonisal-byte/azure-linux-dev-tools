@@ -1261,6 +1261,26 @@ working-dir = "tests"
 	assert.Contains(t, err.Error(), "invalid test suite name")
 }
 
+func TestLoadAndResolveProjectConfig_TestInvalidName(t *testing.T) {
+	// Names containing path separators or traversal segments must be rejected at
+	// config load time since they are used as path components (e.g., venv directories).
+	const configContents = `
+[tests."../escape"]
+type = "pytest"
+
+[tests."../escape".pytest]
+working-dir = "tests"
+test-paths = ["test_smoke.py"]
+`
+
+	ctx := testctx.NewCtx()
+	require.NoError(t, fileutils.WriteFile(ctx.FS(), testConfigPath, []byte(configContents), fileperms.PrivateFile))
+
+	_, err := loadAndResolveProjectConfig(ctx.FS(), false, testConfigPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid test name")
+}
+
 func TestLoadAndResolveProjectConfig_ImageWithValidTestRef(t *testing.T) {
 	const configContents = `
 [test-suites.smoke]

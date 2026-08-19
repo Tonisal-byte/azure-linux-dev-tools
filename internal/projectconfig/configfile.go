@@ -174,6 +174,13 @@ func validateTestSuites(testSuites map[string]TestSuiteConfig) error {
 
 func validateTestDefinitions(tests map[string]TestDefinition) error {
 	for testName, testDef := range tests {
+		// Test names are used as path components (e.g., for the per-test venv directory),
+		// so reject anything that could escape the intended directory or otherwise be unsafe
+		// across platforms.
+		if err := fileutils.ValidateFilename(testName); err != nil {
+			return fmt.Errorf("invalid test name %#q:\n%w", testName, err)
+		}
+
 		if err := testDef.Validate(testName); err != nil {
 			return fmt.Errorf("invalid test %#q:\n%w", testName, err)
 		}

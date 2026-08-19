@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -129,13 +130,27 @@ func (params *commonTestParams) AddFileContents(dst string, contents io.Reader) 
 func (params *commonTestParams) AddDirRecursive(t *testing.T, dst, src string) *commonTestParams {
 	t.Helper()
 
-	// Recursively walk just the files in the source directory.
+	// Recursively walk just the files in the source directory. File contents are read immediately here
+	// (rather than deferring to the container copy step, which happens much later after the container
+	// image is built) to avoid a race with transient files. For example, a git repository under src may
+	// have its background maintenance create and remove '.git/objects/maintenance.lock' at any time; if
+	// we only recorded the host path here, that file could vanish before it was actually copied into the
+	// container, causing an intermittent "no such file or directory" error.
 	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		require.NoError(t, err)
 
 		if entry.IsDir() {
 			return nil // Skip directories.
 		}
+
+		contents, readErr := os.ReadFile(path)
+		if errors.Is(readErr, fs.ErrNotExist) {
+			// The file vanished between being listed and being read (e.g. a transient lock file);
+			// there's nothing meaningful to copy.
+			return nil
+		}
+
+		require.NoError(t, readErr)
 
 		// Get the relative path to the source file.
 		relPath, err := filepath.Rel(src, path)
@@ -144,7 +159,7 @@ func (params *commonTestParams) AddDirRecursive(t *testing.T, dst, src string) *
 		// Construct the destination path.
 		destPath := filepath.Join(dst, relPath)
 
-		params.AddSingleFile(destPath, path)
+		params.AddFileContents(destPath, bytes.NewReader(contents))
 
 		return nil
 	})

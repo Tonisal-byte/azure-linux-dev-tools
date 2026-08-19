@@ -8,6 +8,7 @@ package cmdtest
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,32 @@ func dummyDir(t *testing.T) string {
 	t.Logf("XXXXXX Created dummy directory at %s", subdir)
 
 	return tempDir
+}
+
+func Test_AddDirRecursive_CapturesContentsImmediately(t *testing.T) {
+	t.Parallel()
+
+	dir := dummyDir(t)
+
+	params := &commonTestParams{
+		FilesToCopy:  map[string]string{},
+		FilesToWrite: map[string]io.Reader{},
+	}
+
+	params.AddDirRecursive(t, "testdir", dir)
+
+	// Contents should be captured as in-memory readers, not as deferred host-path copies.
+	assert.Empty(t, params.FilesToCopy)
+
+	nestedDest := filepath.Join("testdir", "subdir", "nested.txt")
+	require.Contains(t, params.FilesToWrite, nestedDest)
+
+	contents, err := io.ReadAll(params.FilesToWrite[nestedDest])
+	require.NoError(t, err)
+	assert.Equal(t, "test content", string(contents))
+
+	// Removing the source directory after the fact must not affect the already-captured contents.
+	require.NoError(t, os.RemoveAll(dir))
 }
 
 func Test_localTestParamsRun(t *testing.T) {
