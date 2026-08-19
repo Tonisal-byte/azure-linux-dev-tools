@@ -4,6 +4,8 @@
 package projectconfig_test
 
 import (
+	"bytes"
+	"log/slog"
 	"testing"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
@@ -15,6 +17,482 @@ import (
 func TestProjectConfigFileValidation_EmptyFile(t *testing.T) {
 	file := projectconfig.ConfigFile{}
 	assert.NoError(t, file.Validate())
+}
+
+func TestProjectConfigFileValidation_TestDefinitionMismatchedSubtable(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type:   "pytest",
+				Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+				Lisa:   map[string]any{"suite": "vm"},
+			},
+		},
+	}
+
+	err := file.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrMismatchedTestSubtable)
+	assert.Contains(t, err.Error(), "invalid test")
+	assert.Contains(t, err.Error(), "smoke")
+	assert.Contains(t, err.Error(), "lisa")
+}
+
+func TestProjectConfigFileValidation_TestDefinitionMatchingSubtable(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type:   "pytest",
+				Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+			},
+		},
+	}
+
+	assert.NoError(t, file.Validate())
+}
+
+func TestProjectConfigFileValidation_TestDefinitionRequiredSubtablePresentButEmpty(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type:   "pytest",
+				Pytest: map[string]any{},
+			},
+		},
+	}
+
+	err := file.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrInvalidPytestConfig)
+	assert.Contains(t, err.Error(), "working-dir")
+}
+
+func TestProjectConfigFileValidation_TestDefinitionDisallowedSubtablePresentButEmpty(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type:   "pytest",
+				Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+				Lisa:   map[string]any{},
+			},
+		},
+	}
+
+	err := file.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrMismatchedTestSubtable)
+	assert.Contains(t, err.Error(), "smoke")
+	assert.Contains(t, err.Error(), "lisa")
+}
+
+func TestProjectConfigFileValidation_TestDefinitionInvalidKind(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type:   "pytest",
+				Kind:   projectconfig.TestKind("unknown-kind"),
+				Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+			},
+		},
+	}
+
+	err := file.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrUnknownTestKind)
+	assert.Contains(t, err.Error(), "unknown-kind")
+}
+
+func TestProjectConfigFileValidation_LisaSelectionMissing(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type: "lisa",
+				Lisa: map[string]any{
+					"source": map[string]any{"git-url": "https://example.com/lisa.git", "ref": "main"},
+				},
+			},
+		},
+	}
+
+	err := file.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrInvalidLisaSelection)
+	assert.Contains(t, err.Error(), "must set at least one LISA selector")
+}
+
+func TestProjectConfigFileValidation_LisaSelectionCriteriaValid(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type: "lisa",
+				Lisa: map[string]any{
+					"criteria": map[string]any{"priority": []any{1, 2}, "tags": []any{"vm", "smoke"}},
+				},
+			},
+			"perf": {
+				Type: "lisa",
+				Lisa: map[string]any{
+					"criteria": []any{
+						map[string]any{"area": "network", "category": "performance"},
+						map[string]any{"testcase-names": []any{"case_a", "case_b"}},
+					},
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, file.Validate())
+}
+
+func TestProjectConfigFileValidation_LisaSelectionUnsupportedCriteriaKey(t *testing.T) {
+	file := projectconfig.ConfigFile{
+		Tests: map[string]projectconfig.TestDefinition{
+			"smoke": {
+				Type: "lisa",
+				Lisa: map[string]any{
+					"criteria": map[string]any{"suite": "smoke"},
+				},
+			},
+		},
+	}
+
+	err := file.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrInvalidLisaSelection)
+	assert.Contains(t, err.Error(), "unsupported selector")
+}
+
+func TestProjectConfigValidation_UndefinedTestReferenceInGroup(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"bvt": {
+			Tests: []projectconfig.TestRef{{Name: "does-not-exist"}},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrUndefinedTest)
+	assert.Contains(t, err.Error(), "does-not-exist")
+}
+
+func TestProjectConfigValidation_UndefinedTestGroupReferenceInComponent(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Components = map[string]projectconfig.ComponentConfig{
+		"openssl": {
+			Tests: &projectconfig.ComponentTestsConfig{
+				Tests: []projectconfig.TestRef{{Group: "missing-group"}},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrUndefinedTestGroup)
+	assert.Contains(t, err.Error(), "missing-group")
+}
+
+func TestProjectConfigValidation_InvalidTestReferenceShapeInImage(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Images = map[string]projectconfig.ImageConfig{
+		"base": {
+			Tests: &projectconfig.ImageTestsConfig{
+				Tests: []projectconfig.TestRef{{Name: "smoke", Group: "bvt"}},
+			},
+		},
+	}
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"smoke": {
+			Type:   "pytest",
+			Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+		},
+	}
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"bvt": {Tests: []projectconfig.TestRef{{Name: "smoke"}}},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrInvalidTestRef)
+	assert.Contains(t, err.Error(), "exactly one")
+}
+
+func TestProjectConfigValidation_DuplicateTestReferenceInGroup(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"smoke": {
+			Type:   "pytest",
+			Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+		},
+	}
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"bvt": {
+			Tests: []projectconfig.TestRef{
+				{Name: "smoke"},
+				{Name: "smoke"},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrDuplicateTestRef)
+	assert.Contains(t, err.Error(), "duplicates")
+	assert.Contains(t, err.Error(), "smoke")
+}
+
+func TestProjectConfigValidation_DuplicateTestGroupReferenceInImage(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"smoke": {
+			Type:   "pytest",
+			Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+		},
+	}
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"bvt": {
+			Tests: []projectconfig.TestRef{{Name: "smoke"}},
+		},
+	}
+	cfg.Images = map[string]projectconfig.ImageConfig{
+		"base": {
+			Tests: &projectconfig.ImageTestsConfig{
+				Tests: []projectconfig.TestRef{
+					{Group: "bvt"},
+					{Group: "bvt"},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrDuplicateTestRef)
+	assert.Contains(t, err.Error(), "duplicates")
+	assert.Contains(t, err.Error(), "bvt")
+}
+
+func TestProjectConfigValidation_DuplicateTestViaNameAndGroupInImage(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"ssh-smoke": {
+			Type:   "pytest",
+			Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+		},
+	}
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"bvt": {
+			Tests: []projectconfig.TestRef{{Name: "ssh-smoke"}},
+		},
+	}
+	cfg.Images = map[string]projectconfig.ImageConfig{
+		"vm-base": {
+			Tests: &projectconfig.ImageTestsConfig{
+				Tests: []projectconfig.TestRef{
+					{Name: "ssh-smoke"},
+					{Group: "bvt"},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrDuplicateTestRef)
+	assert.Contains(t, err.Error(), "duplicates")
+	assert.Contains(t, err.Error(), "ssh-smoke")
+	assert.Contains(t, err.Error(), "name=")
+	assert.Contains(t, err.Error(), "group=")
+	assert.Contains(t, err.Error(), "bvt")
+}
+
+func TestProjectConfigValidation_ContradictingImageCapabilities(t *testing.T) {
+	trueVal := true
+
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Images = map[string]projectconfig.ImageConfig{
+		"vm-iso-installer": {
+			Capabilities: projectconfig.ImageCapabilities{
+				MachineBootable: &trueVal,
+				InstallerMedia:  &trueVal,
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrContradictingImageCapabilities)
+	assert.Contains(t, err.Error(), "vm-iso-installer")
+	assert.Contains(t, err.Error(), "machine-bootable")
+	assert.Contains(t, err.Error(), "installer-media")
+}
+
+func TestProjectConfigValidation_NonContradictingImageCapabilities(t *testing.T) {
+	trueVal := true
+
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Images = map[string]projectconfig.ImageConfig{
+		"vm-base": {
+			Capabilities: projectconfig.ImageCapabilities{
+				MachineBootable: &trueVal,
+			},
+		},
+		"container-base": {
+			Capabilities: projectconfig.ImageCapabilities{
+				Container: &trueVal,
+			},
+		},
+		"wsl": {
+			Capabilities: projectconfig.ImageCapabilities{
+				WSL: &trueVal,
+			},
+		},
+		"vm-iso-installer": {
+			Capabilities: projectconfig.ImageCapabilities{
+				InstallerMedia: &trueVal,
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.NoError(t, err)
+}
+
+func TestProjectConfigValidation_LegacyTestSuitesEmitsDeprecationWarning(t *testing.T) {
+	var buf bytes.Buffer
+
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	cfg := projectconfig.NewProjectConfig()
+	cfg.TestSuites = map[string]projectconfig.TestSuiteConfig{
+		"static-image-checks": {},
+	}
+	cfg.Images = map[string]projectconfig.ImageConfig{
+		"legacy-img": {
+			Tests: &projectconfig.ImageTestsConfig{
+				TestSuites: []projectconfig.TestSuiteRef{{Name: "static-image-checks"}},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.NoError(t, err)
+
+	logs := buf.String()
+	assert.Contains(t, logs, "deprecated")
+	assert.Contains(t, logs, "tests.test-suites")
+	assert.Contains(t, logs, "legacy-img")
+}
+
+func TestProjectConfigValidation_NewShapeTestsNoDeprecationWarning(t *testing.T) {
+	var buf bytes.Buffer
+
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"static-image-checks": {
+			Type:   "pytest",
+			Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+		},
+	}
+	cfg.Images = map[string]projectconfig.ImageConfig{
+		"new-img": {
+			Tests: &projectconfig.ImageTestsConfig{
+				Tests: []projectconfig.TestRef{{Name: "static-image-checks"}},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.NoError(t, err)
+
+	assert.NotContains(t, buf.String(), "deprecated")
+}
+
+func TestProjectConfigValidation_NestedTestGroupReferenceNotAllowed(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"smoke": {
+			Type:   "pytest",
+			Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+		},
+	}
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"a": {Tests: []projectconfig.TestRef{{Group: "b"}}},
+		"b": {Tests: []projectconfig.TestRef{{Name: "smoke"}}},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.ErrorIs(t, err, projectconfig.ErrNestedTestGroupReference)
+	assert.Contains(t, err.Error(), "is not allowed in [test-groups]")
+}
+
+func TestProjectConfigResolveImageTests_ExpandsGroups(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"static-image-checks": {
+			Type:   "pytest",
+			Pytest: map[string]any{"working-dir": "tests", "test-paths": []any{"test_smoke.py"}},
+		},
+		"functional_core": {Type: "lisa", Lisa: map[string]any{"criteria": map[string]any{"priority": []any{1}}}},
+		"lisa_perf": {
+			Type: "lisa",
+			Lisa: map[string]any{"criteria": map[string]any{"area": "network", "category": "performance"}},
+		},
+	}
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"vm-base-functional":  {Tests: []projectconfig.TestRef{{Name: "functional_core"}}},
+		"vm-base-performance": {Tests: []projectconfig.TestRef{{Name: "lisa_perf"}}},
+	}
+
+	imageCfg := &projectconfig.ImageConfig{
+		Tests: &projectconfig.ImageTestsConfig{
+			Tests: []projectconfig.TestRef{
+				{Name: "static-image-checks"},
+				{Group: "vm-base-functional"},
+				{Group: "vm-base-performance"},
+			},
+		},
+	}
+
+	resolved, err := cfg.ResolveImageTests(imageCfg)
+	require.NoError(t, err)
+	require.Len(t, resolved, 3)
+	assert.Equal(t, []string{"static-image-checks", "functional_core", "lisa_perf"}, []string{
+		resolved[0].Name,
+		resolved[1].Name,
+		resolved[2].Name,
+	})
+}
+
+func TestProjectConfigResolveComponentTests_ExpandsGroups(t *testing.T) {
+	cfg := projectconfig.NewProjectConfig()
+	cfg.Tests = map[string]projectconfig.TestDefinition{
+		"bash-fedora-shell": {Type: "tmt", Tmt: map[string]any{"plan": "/plans/shell"}},
+	}
+	cfg.TestGroups = map[string]projectconfig.TestGroup{
+		"shell-tests": {Tests: []projectconfig.TestRef{{Name: "bash-fedora-shell"}}},
+	}
+
+	componentCfg := &projectconfig.ComponentConfig{
+		Tests: &projectconfig.ComponentTestsConfig{
+			Tests: []projectconfig.TestRef{{Group: "shell-tests"}},
+		},
+	}
+
+	resolved, err := cfg.ResolveComponentTests(componentCfg)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, "bash-fedora-shell", resolved[0].Name)
+	assert.Equal(t, "tmt", resolved[0].Definition.Type)
 }
 
 func TestProjectConfigFileValidation_DefaultProjectInfo(t *testing.T) {

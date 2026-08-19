@@ -6,7 +6,9 @@ package projectconfig
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
+	"strings"
 
 	"dario.cat/mergo"
 	"github.com/brunoga/deep"
@@ -47,6 +49,12 @@ type ProjectConfig struct {
 	// Definitions of test suites.
 	TestSuites map[string]TestSuiteConfig `toml:"test-suites,omitempty" json:"testSuites,omitempty" jsonschema:"title=Test Suites,description=Mapping of test suite names to configurations"`
 
+	// Definitions of individual tests.
+	Tests map[string]TestDefinition `toml:"tests,omitempty" json:"tests,omitempty" jsonschema:"title=Tests,description=Mapping of test names to configurations"`
+
+	// Definitions of named test groups.
+	TestGroups map[string]TestGroup `toml:"test-groups,omitempty" json:"testGroups,omitempty" jsonschema:"title=Test Groups,description=Mapping of test group names to configurations"`
+
 	// Root config file path; not serialized.
 	RootConfigFilePath string `toml:"-" json:"-"`
 	// Map from component names to groups they belong to; not serialized.
@@ -65,6 +73,8 @@ func NewProjectConfig() ProjectConfig {
 		GroupsByComponent: make(map[string][]string),
 		PackageGroups:     make(map[string]PackageGroupConfig),
 		TestSuites:        make(map[string]TestSuiteConfig),
+		Tests:             make(map[string]TestDefinition),
+		TestGroups:        make(map[string]TestGroup),
 	}
 }
 
@@ -84,6 +94,14 @@ func (cfg *ProjectConfig) Validate() error {
 	}
 
 	if err := validateImageTestReferences(cfg.Images, cfg.TestSuites); err != nil {
+		return err
+	}
+
+	if err := validateImageCapabilities(cfg.Images); err != nil {
+		return err
+	}
+
+	if err := validateNewTestReferences(cfg.Tests, cfg.TestGroups, cfg.Components, cfg.Images); err != nil {
 		return err
 	}
 
@@ -270,9 +288,18 @@ func validatePackageGroupMembership(groups map[string]PackageGroupConfig) error 
 
 // validateImageTestReferences checks that every test suite name in an image's
 // [ImageConfig.Tests.TestSuites] list corresponds to a defined entry in the top-level
-// TestSuites map.
+// TestSuites map. The legacy [tests.test-suites] image key is deprecated in favor of the
+// new [tests.tests] shape; a warning is emitted for each image still using it.
 func validateImageTestReferences(images map[string]ImageConfig, testSuites map[string]TestSuiteConfig) error {
 	for imageName, image := range images {
+		if image.Tests != nil && len(image.Tests.TestSuites) > 0 {
+			slog.Warn(
+				"image uses deprecated 'tests.test-suites' key; migrate to 'tests.tests' "+
+					"(referencing [tests.X] / [test-groups.X]) as legacy test-suites will be removed",
+				slog.String("image", imageName),
+			)
+		}
+
 		for _, suiteName := range image.TestNames() {
 			if _, ok := testSuites[suiteName]; !ok {
 				return fmt.Errorf(
@@ -280,6 +307,43 @@ func validateImageTestReferences(images map[string]ImageConfig, testSuites map[s
 					ErrUndefinedTestSuite, imageName, suiteName,
 				)
 			}
+		}
+	}
+
+	return nil
+}
+
+// validateImageCapabilities enforces mutual exclusivity among delivery-kind
+// capability flags. At most one of machine-bootable, container, wsl, and
+// installer-media may be true for a single image.
+func validateImageCapabilities(images map[string]ImageConfig) error {
+	for imageName, image := range images {
+		var trueKinds []string
+
+		if image.Capabilities.IsMachineBootable() {
+			trueKinds = append(trueKinds, "machine-bootable")
+		}
+
+		if image.Capabilities.IsContainer() {
+			trueKinds = append(trueKinds, "container")
+		}
+
+		if image.Capabilities.IsWSL() {
+			trueKinds = append(trueKinds, "wsl")
+		}
+
+		if image.Capabilities.IsInstallerMedia() {
+			trueKinds = append(trueKinds, "installer-media")
+		}
+
+		if len(trueKinds) > 1 {
+			return fmt.Errorf(
+				"%w: image %#q sets mutually exclusive capabilities to true (%s); "+
+					"at most one of machine-bootable, container, wsl, installer-media may be true",
+				ErrContradictingImageCapabilities,
+				imageName,
+				strings.Join(trueKinds, ", "),
+			)
 		}
 	}
 

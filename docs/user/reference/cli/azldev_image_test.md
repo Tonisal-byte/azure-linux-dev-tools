@@ -6,15 +6,17 @@ Run tests against an Azure Linux image
 
 ### Synopsis
 
-Run tests against an Azure Linux image using test suites defined in the
+Run tests against an Azure Linux image using test definitions declared in the
 project configuration.
 
-Test suites are defined in the [test-suites] section of azldev.toml and referenced
-by images via the [images.NAME.tests] subtable. Each test suite specifies a type
-(pytest or lisa) and framework-specific configuration in a matching subtable.
+Images may reference tests directly via [images.NAME.tests.tests] entries, or via
+named [test-groups]. Legacy [test-suites] references are still supported.
 
-By default, all test suites associated with the named image are run. Use
---test-suite to select specific suites (may be repeated).
+By default, all tests associated with the named image are run. Use
+--test-suite to select specific test names or test-group names (may be repeated).
+For images still configured with legacy [test-suites] (via 'tests.test-suites'),
+the values passed to --test-suite are instead matched against those legacy
+test suite names.
 
 The image artifact can be specified explicitly with --image-path, or resolved
 automatically from the image name in the output directory.
@@ -26,10 +28,15 @@ extra-args to insert the image path. Glob patterns (including **) in
 test-paths are expanded automatically.
 
 For LISA tests, the test runner executes on the host and boots the image in a
-QEMU VM. azldev clones the LISA framework, generates a runbook from the suite's
-configured test cases, and runs it against the image. azldev generates an
-ephemeral SSH key pair to access the booted VM and removes it once the suite
-finishes.
+QEMU VM. azldev clones the LISA framework, generates a runbook from the test's
+configured criteria (or, for legacy [test-suites], its test cases), and runs it
+against the image. azldev generates an ephemeral SSH key pair to access the
+booted VM and removes it once the test finishes. New-style [tests.X] LISA
+definitions require a [tests.X.lisa.source] (git-url, ref) to run locally;
+without one, the test is metadata-only and must be run through the LISA
+infrastructure. Use --lisa-dir to run against an already-cloned LISA checkout
+instead of cloning; this also allows running new-style LISA tests that have no
+[tests.X.lisa.source] configured.
 
 ```
 azldev image test IMAGE_NAME [flags]
@@ -38,17 +45,17 @@ azldev image test IMAGE_NAME [flags]
 ### Examples
 
 ```
-  # Run all test suites for an image (artifact auto-resolved from output dir)
+  # Run all tests for an image (artifact auto-resolved from output dir)
   azldev image test vm-base
 
   # Run all test suites with an explicit image path
   azldev image test vm-base --image-path ./out/images/vm-base/image.raw
 
-  # Run a specific test suite
-  azldev image test vm-base --test-suite common-vm-checks
+	# Run a specific test
+	azldev image test vm-base --test-suite static-image-checks
 
-  # Run multiple specific test suites
-  azldev image test vm-base --test-suite common-vm-checks --test-suite vm-base-checks
+	# Run multiple tests or a test-group
+	azldev image test vm-base --test-suite static-image-checks --test-suite vm-base-functional
 
   # Generate JUnit XML output
   azldev image test vm-base --junit-xml results.xml
@@ -60,7 +67,8 @@ azldev image test IMAGE_NAME [flags]
   -h, --help                 help for test
   -i, --image-path string    Path to the disk image file (resolved from image name if not specified)
       --junit-xml string     Path for writing JUnit XML output
-      --test-suite strings   Name of a test suite to run (may be repeated; defaults to all suites for the image)
+      --lisa-dir string      Path to an already-cloned LISA framework checkout to run against, instead of cloning the framework's configured git source
+      --test-suite strings   Name of a test or test-group to run (may be repeated; defaults to all tests for the image). For images configured with legacy [test-suites], this instead selects legacy test suite names
 ```
 
 ### Options inherited from parent commands

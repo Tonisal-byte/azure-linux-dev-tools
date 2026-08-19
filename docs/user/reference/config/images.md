@@ -32,14 +32,19 @@ The `capabilities` subtable describes what the image supports. All fields are op
 | Container | `container` | bool | unset | Whether the image can be run on an OCI container host |
 | Systemd | `systemd` | bool | unset | Whether the image runs systemd as its init system |
 | Runtime Package Management | `runtime-package-management` | bool | unset | Whether the image supports installing/removing packages at runtime (e.g., via dnf/tdnf) |
+| WSL | `wsl` | bool | unset | Whether the image runs under the Windows Subsystem for Linux runtime |
+| Installer Media | `installer-media` | bool | unset | Whether the image is installer media (e.g. an ISO) that installs another OS, rather than a directly runnable end-state image |
+| FIPS Enabled | `fips-enabled` | bool | unset | Whether the image is built or configured to run in FIPS mode |
+| CVM | `cvm` | bool | unset | Whether the image supports running as a Confidential VM (CVM) |
 
 ## Image Tests
 
-The `tests` subtable links an image to one or more test suites defined in the top-level [`[test-suites]`](test-suites.md) section.
+The `tests` subtable links an image to one or more test suites defined in the top-level [`[test-suites]`](test-suites.md) section, and/or to entries from the new-shape [`[tests]` / `[test-groups]`](tests.md) sections.
 
 | Field | TOML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
 | Test Suites | `test-suites` | array of inline tables | No | List of test suite references. Each entry must have a `name` field matching a key in `[test-suites]`. |
+| Tests | `tests` | array of [TestRef](tests.md#test-reference) | No | References to `[tests.<name>]` entries or `[test-groups.<name>]` entries (parse-only; see [Tests and Test Groups](tests.md)). |
 
 ## Image Publish
 
@@ -118,4 +123,5 @@ channels = ["registry-prod", "registry-staging"]
 
 - [Config File Structure](config-file.md) — top-level config file layout
 - [Test Suites](test-suites.md) — test suite definitions
+- [Tests and Test Groups](tests.md) — new-shape test/group definitions referenced by `[images.<name>.tests]`
 - [Tools](tools.md) — Image Customizer tool configuration

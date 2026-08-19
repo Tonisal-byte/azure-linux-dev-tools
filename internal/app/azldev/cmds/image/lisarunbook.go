@@ -31,8 +31,16 @@ type lisaTestcase struct {
 	Criteria lisaCriteria `yaml:"criteria"`
 }
 
+// lisaCriteria models a single LISA runbook testcase criteria block. All rules within
+// one criteria are AND-ed together by LISA; multiple criteria (multiple lisaTestcase
+// entries) are OR-ed. Name carries either an explicit name pattern or one or more test
+// case names joined with '|' (azldev's 'testcase-name'/'testcase-names' selectors).
 type lisaCriteria struct {
-	Name string `yaml:"name"`
+	Name     string   `yaml:"name,omitempty"`
+	Area     string   `yaml:"area,omitempty"`
+	Category string   `yaml:"category,omitempty"`
+	Priority any      `yaml:"priority,omitempty"`
+	Tags     []string `yaml:"tags,omitempty"`
 }
 
 type lisaNotifier struct {
@@ -76,12 +84,28 @@ const (
 // key path) are inlined as concrete values. keep_environment is "no" so LISA tears down the
 // VM environment after the run.
 func generateRunbookYAML(suiteName string, testCases []string, imagePath, adminKeyPath string) ([]byte, error) {
+	criteria := []lisaCriteria{{Name: strings.Join(testCases, "|")}}
+
+	return generateRunbookYAMLFromCriteria(suiteName, criteria, imagePath, adminKeyPath)
+}
+
+// generateRunbookYAMLFromCriteria builds a LISA runbook selecting test cases via one or
+// more criteria blocks (name, area, category, priority, tags) on a QEMU VM booted from
+// imagePath, authenticating with adminKeyPath. Each criteria produces its own testcase
+// entry; LISA ORs test cases matched across entries. keep_environment is "no" so LISA
+// tears down the VM environment after the run.
+func generateRunbookYAMLFromCriteria(
+	suiteName string, criteria []lisaCriteria, imagePath, adminKeyPath string,
+) ([]byte, error) {
+	testcases := make([]lisaTestcase, 0, len(criteria))
+	for _, c := range criteria {
+		testcases = append(testcases, lisaTestcase{Criteria: c})
+	}
+
 	runbook := lisaRunbook{
-		Name:    suiteName,
-		Include: []lisaInclude{{Path: runbookTierIncludePath}},
-		Testcase: []lisaTestcase{
-			{Criteria: lisaCriteria{Name: strings.Join(testCases, "|")}},
-		},
+		Name:     suiteName,
+		Include:  []lisaInclude{{Path: runbookTierIncludePath}},
+		Testcase: testcases,
 		Notifier: []lisaNotifier{{Type: "html"}},
 		Platform: []lisaPlatform{
 			{

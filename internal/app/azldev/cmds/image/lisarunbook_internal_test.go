@@ -52,3 +52,38 @@ func TestGenerateRunbookYAML_SingleTestCase(t *testing.T) {
 	require.Len(t, runbook.Testcase, 1)
 	assert.Equal(t, "verify_grub", runbook.Testcase[0].Criteria.Name)
 }
+
+func TestGenerateRunbookYAMLFromCriteria_MultipleEntries(t *testing.T) {
+	criteria := []lisaCriteria{
+		{Area: "network", Category: "performance"},
+		{Area: "storage", Category: "performance"},
+	}
+
+	data, err := generateRunbookYAMLFromCriteria("lisa-perf", criteria, "/abs/image.qcow2", "/key")
+	require.NoError(t, err)
+
+	var runbook lisaRunbook
+	require.NoError(t, yaml.Unmarshal(data, &runbook))
+
+	require.Len(t, runbook.Testcase, 2)
+	assert.Equal(t, "network", runbook.Testcase[0].Criteria.Area)
+	assert.Equal(t, "performance", runbook.Testcase[0].Criteria.Category)
+	assert.Empty(t, runbook.Testcase[0].Criteria.Name)
+	assert.Equal(t, "storage", runbook.Testcase[1].Criteria.Area)
+}
+
+func TestGenerateRunbookYAMLFromCriteria_PriorityAndTags(t *testing.T) {
+	criteria := []lisaCriteria{
+		{Priority: []int{1}, Tags: []string{"smoke", "fast"}},
+	}
+
+	data, err := generateRunbookYAMLFromCriteria("functional-core", criteria, "img", "key")
+	require.NoError(t, err)
+
+	var runbook lisaRunbook
+	require.NoError(t, yaml.Unmarshal(data, &runbook))
+
+	require.Len(t, runbook.Testcase, 1)
+	assert.Equal(t, []any{1}, runbook.Testcase[0].Criteria.Priority)
+	assert.Equal(t, []string{"smoke", "fast"}, runbook.Testcase[0].Criteria.Tags)
+}

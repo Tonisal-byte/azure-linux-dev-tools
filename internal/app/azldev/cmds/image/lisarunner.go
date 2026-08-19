@@ -57,13 +57,98 @@ func RunLisaSuite(
 		slog.String("image-path", options.ImagePath),
 	)
 
-	// Ensure python3 and git are available.
-	if err := prereqs.RequireExecutable(env, pythonProgram, nil); err != nil {
-		return fmt.Errorf("python3 is required to run LISA tests:\n%w", err)
+	criteria := []lisaCriteria{{Name: strings.Join(lisaConfig.TestCases, "|")}}
+
+	return runLisaLocally(
+		env, suiteConfig.Name, &lisaConfig.Framework, criteria,
+		lisaConfig.PipPreInstall, lisaConfig.PipExtras, lisaConfig.ExtraArgs,
+		imageConfig, options,
+	)
+}
+
+// RunLisaTestDefinition runs a new-style [tests.X] LISA test definition locally, generating
+// a runbook from the test's configured criteria and invoking LISA. It requires either
+// options.LisaDir (an already-cloned LISA checkout) or the test's [tests.X.lisa] subtable
+// to include a 'source' (git-url, ref) identifying the LISA framework to clone; tests with
+// neither are metadata-only and cannot be run locally (they must be run through external
+// orchestration).
+func RunLisaTestDefinition(
+	env *azldev.Env, resolvedTest projectconfig.ResolvedTest,
+	imageConfig *projectconfig.ImageConfig, options *ImageTestOptions,
+) error {
+	lisa := resolvedTest.Definition.Lisa
+	if lisa == nil {
+		return fmt.Errorf(
+			"test %#q of type %#q has no [tests.%s.lisa] subtable", resolvedTest.Name,
+			projectconfig.TestTypeLisa, resolvedTest.Name,
+		)
 	}
 
-	if err := prereqs.RequireExecutable(env, "git", nil); err != nil {
-		return fmt.Errorf("git is required to clone LISA repos:\n%w", err)
+	// A user-provided LISA checkout (--lisa-dir) makes the 'source' (git-url, ref) optional:
+	// azldev runs against the given checkout instead of cloning one.
+	var framework *projectconfig.GitSourceConfig
+
+	if options.LisaDir == "" {
+		var err error
+
+		framework, err = parseLisaSource(lisa, resolvedTest.Name)
+		if err != nil {
+			return err
+		}
+	}
+
+	criteria, err := parseLisaCriteriaFromDefinition(lisa, resolvedTest.Name)
+	if err != nil {
+		return err
+	}
+
+	pipPreInstall, err := toOptionalStringSlice(lisa["pip-pre-install"], "pip-pre-install")
+	if err != nil {
+		return fmt.Errorf("test %#q lisa.%w", resolvedTest.Name, err)
+	}
+
+	pipExtras, err := toOptionalStringSlice(lisa["pip-extras"], "pip-extras")
+	if err != nil {
+		return fmt.Errorf("test %#q lisa.%w", resolvedTest.Name, err)
+	}
+
+	extraArgs, err := toOptionalStringSlice(lisa["extra-args"], "extra-args")
+	if err != nil {
+		return fmt.Errorf("test %#q lisa.%w", resolvedTest.Name, err)
+	}
+
+	logFields := []any{
+		slog.String("name", resolvedTest.Name),
+		slog.Int("criteria", len(criteria)),
+		slog.String("image-path", options.ImagePath),
+	}
+
+	if framework != nil {
+		logFields = append(logFields, slog.String("framework-ref", framework.Ref))
+	}
+
+	slog.Info("Running LISA test", logFields...)
+
+	return runLisaLocally(
+		env, resolvedTest.Name, framework, criteria,
+		pipPreInstall, pipExtras, extraArgs, imageConfig, options,
+	)
+}
+
+// runLisaLocally sets up the LISA framework and venv, generates a runbook from the given
+// criteria, and invokes LISA against the given image. It is shared by RunLisaSuite (legacy
+// [test-suites] suites) and RunLisaTestDefinition (new-style [tests] definitions). If
+// options.LisaDir is set, that checkout is used directly instead of cloning framework; in
+// that case framework may be nil.
+func runLisaLocally(
+	env *azldev.Env, name string, framework *projectconfig.GitSourceConfig, criteria []lisaCriteria,
+	pipPreInstall, pipExtras, extraArgs []string,
+	imageConfig *projectconfig.ImageConfig, options *ImageTestOptions,
+) error {
+	// Ensure python3 is available; git is only needed when azldev clones the framework
+	// itself (i.e., --lisa-dir was not given).
+	if err := prereqs.RequireExecutable(env, pythonProgram, nil); err != nil {
+		return fmt.Errorf("python3 is required to run LISA tests:\n%w", err)
 	}
 
 	workDir := env.WorkDir()
@@ -72,15 +157,14 @@ func RunLisaSuite(
 		// 'lisa/' tree (keys, framework clones, generated runbooks) under the
 		// user's CWD, which is surprising and can pollute repos. Fail fast instead.
 		return fmt.Errorf(
-			"cannot run LISA test suite %#q: project work directory is not configured",
-			suiteConfig.Name,
+			"cannot run LISA test %#q: project work directory is not configured", name,
 		)
 	}
 
 	lisaBaseDir := filepath.Join(workDir, lisaDirName)
 
 	// Generate an ephemeral admin SSH key pair for VM access; it is removed once the
-	// suite finishes.
+	// test finishes.
 	adminKeyPath, keyCleanup, err := generateAdminKeyPair(env, lisaBaseDir)
 	if err != nil {
 		return err
@@ -88,16 +172,15 @@ func RunLisaSuite(
 
 	defer keyCleanup()
 
-	// Clone/update the LISA framework.
-	frameworkDir, err := ensureGitRepo(
-		env, lisaBaseDir, lisaFrameworkDirName, &lisaConfig.Framework,
-	)
+	// Resolve the LISA framework directory: either a user-provided checkout, or a
+	// clone/update of the configured git source.
+	frameworkDir, err := resolveLisaFrameworkDir(env, name, lisaBaseDir, framework, options)
 	if err != nil {
-		return fmt.Errorf("failed to set up LISA framework:\n%w", err)
+		return err
 	}
 
 	// Set up or reuse the LISA venv and install the framework.
-	venvDir, err := ensureLisaVenv(env, suiteConfig.Name, frameworkDir, lisaConfig.PipPreInstall, lisaConfig.PipExtras)
+	venvDir, err := ensureLisaVenv(env, name, frameworkDir, pipPreInstall, pipExtras)
 	if err != nil {
 		return err
 	}
@@ -108,16 +191,14 @@ func RunLisaSuite(
 		return err
 	}
 
-	// Generate a runbook from the configured test cases and write it into the framework
+	// Generate a runbook from the configured criteria and write it into the framework
 	// tree so its relative includes resolve.
-	runbookPath, err := writeGeneratedRunbook(
-		env, frameworkDir, suiteConfig.Name, lisaConfig.TestCases, options.ImagePath, adminKeyPath,
-	)
+	runbookPath, err := writeGeneratedRunbook(env, frameworkDir, name, criteria, options.ImagePath, adminKeyPath)
 	if err != nil {
 		return err
 	}
 
-	// Remove the generated runbook from the framework checkout once the suite finishes so
+	// Remove the generated runbook from the framework checkout once the test finishes so
 	// stale azldev-generated-* files don't accumulate or influence future runs.
 	defer func() {
 		if removeErr := env.FS().RemoveAll(runbookPath); removeErr != nil {
@@ -127,9 +208,56 @@ func RunLisaSuite(
 	}()
 
 	// Build LISA arguments with placeholder expansion.
-	lisaArgs := buildLisaArgs(runbookPath, lisaConfig.ExtraArgs, imageConfig, options)
+	lisaArgs := buildLisaArgs(runbookPath, extraArgs, imageConfig, options)
 
 	return runLisaCommand(env, venvDir, frameworkDir, lisaArgs)
+}
+
+// resolveLisaFrameworkDir returns the LISA framework directory to run against: either
+// options.LisaDir, an already-cloned checkout provided by the user (validated to exist),
+// or a clone/update of the given git source. Using a user-provided checkout avoids
+// introducing any git-source metadata requirement for the test. framework may be nil only
+// when options.LisaDir is set.
+func resolveLisaFrameworkDir(
+	env *azldev.Env, name, lisaBaseDir string, framework *projectconfig.GitSourceConfig, options *ImageTestOptions,
+) (string, error) {
+	if options.LisaDir != "" {
+		absDir, err := filepath.Abs(options.LisaDir)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve --lisa-dir %#q:\n%w", options.LisaDir, err)
+		}
+
+		isDir, err := fileutils.DirExists(env.FS(), absDir)
+		if err != nil {
+			return "", fmt.Errorf("cannot access --lisa-dir %#q:\n%w", absDir, err)
+		}
+
+		if !isDir {
+			return "", fmt.Errorf("--lisa-dir %#q does not exist or is not a directory", absDir)
+		}
+
+		slog.Info("Using user-provided LISA framework checkout", slog.String("path", absDir))
+
+		return absDir, nil
+	}
+
+	if framework == nil {
+		return "", fmt.Errorf(
+			"cannot run LISA test %#q: no LISA framework source configured; specify --lisa-dir "+
+				"to run against an existing checkout", name,
+		)
+	}
+
+	if err := prereqs.RequireExecutable(env, "git", nil); err != nil {
+		return "", fmt.Errorf("git is required to clone LISA repos:\n%w", err)
+	}
+
+	frameworkDir, err := ensureGitRepo(env, lisaBaseDir, lisaFrameworkDirName, framework)
+	if err != nil {
+		return "", fmt.Errorf("failed to set up LISA framework:\n%w", err)
+	}
+
+	return frameworkDir, nil
 }
 
 // runLisaCommand invokes the LISA executable from the framework's venv with the given args,
@@ -158,16 +286,16 @@ func runLisaCommand(env *azldev.Env, venvDir, frameworkDir string, lisaArgs []st
 	return nil
 }
 
-// writeGeneratedRunbook generates a LISA runbook from the given test cases and writes it at
+// writeGeneratedRunbook generates a LISA runbook from the given criteria and writes it at
 // the framework repo root, so that its repo-root-relative tier include
 // ('lisa/microsoft/runbook/tiers/tier.yml') resolves against the real tier definitions.
 // It returns the absolute path to the written runbook.
 func writeGeneratedRunbook(
-	env *azldev.Env, frameworkDir, suiteName string, testCases []string,
+	env *azldev.Env, frameworkDir, name string, criteria []lisaCriteria,
 	imagePath, adminKeyPath string,
 ) (string, error) {
-	if len(testCases) == 0 {
-		return "", fmt.Errorf("test suite %#q has no lisa test-cases to run", suiteName)
+	if len(criteria) == 0 {
+		return "", fmt.Errorf("test %#q has no LISA criteria to run", name)
 	}
 
 	absImagePath, err := filepath.Abs(imagePath)
@@ -175,13 +303,13 @@ func writeGeneratedRunbook(
 		absImagePath = imagePath
 	}
 
-	runbookYAML, err := generateRunbookYAML(suiteName, testCases, absImagePath, adminKeyPath)
+	runbookYAML, err := generateRunbookYAMLFromCriteria(name, criteria, absImagePath, adminKeyPath)
 	if err != nil {
 		return "", err
 	}
 
 	// Write the runbook at the framework repo root so its repo-root-relative include resolves.
-	runbookPath := filepath.Join(frameworkDir, lisaGeneratedRunbookPrefix+suiteName+".yml")
+	runbookPath := filepath.Join(frameworkDir, lisaGeneratedRunbookPrefix+name+".yml")
 
 	if err := fileutils.WriteFile(env.FS(), runbookPath, runbookYAML, fileperms.PrivateFile); err != nil {
 		return "", fmt.Errorf("failed to write generated runbook %#q:\n%w", runbookPath, err)

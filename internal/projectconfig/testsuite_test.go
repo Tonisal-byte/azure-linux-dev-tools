@@ -33,9 +33,14 @@ func TestImageCapabilities_EnabledNames(t *testing.T) {
 			Container:                lo.ToPtr(true),
 			Systemd:                  lo.ToPtr(true),
 			RuntimePackageManagement: lo.ToPtr(true),
+			WSL:                      lo.ToPtr(true),
+			InstallerMedia:           lo.ToPtr(true),
+			FipsEnabled:              lo.ToPtr(true),
+			CVM:                      lo.ToPtr(true),
 		}
 		assert.Equal(t, []string{
-			"machine-bootable", "container", "systemd", "runtime-package-management",
+			"machine-bootable", "container", "systemd", "runtime-package-management", "wsl", "installer-media",
+			"fips-enabled", "cvm",
 		}, caps.EnabledNames())
 	})
 
@@ -64,7 +69,7 @@ func TestImageCapabilities_EnabledNames(t *testing.T) {
 func TestImageConfig_TestNames(t *testing.T) {
 	t.Run("with tests", func(t *testing.T) {
 		img := projectconfig.ImageConfig{
-			Tests: projectconfig.ImageTestsConfig{
+			Tests: &projectconfig.ImageTestsConfig{
 				TestSuites: []projectconfig.TestSuiteRef{
 					{Name: "smoke"},
 					{Name: "integration"},
@@ -357,7 +362,7 @@ func TestValidateTestSuiteReferences(t *testing.T) {
 			Images: map[string]projectconfig.ImageConfig{
 				"myimage": {
 					Name:  "myimage",
-					Tests: projectconfig.ImageTestsConfig{TestSuites: []projectconfig.TestSuiteRef{{Name: "smoke"}}},
+					Tests: &projectconfig.ImageTestsConfig{TestSuites: []projectconfig.TestSuiteRef{{Name: "smoke"}}},
 				},
 			},
 			TestSuites: map[string]projectconfig.TestSuiteConfig{
@@ -383,7 +388,7 @@ func TestValidateTestSuiteReferences(t *testing.T) {
 			Images: map[string]projectconfig.ImageConfig{
 				"myimage": {
 					Name:  "myimage",
-					Tests: projectconfig.ImageTestsConfig{TestSuites: []projectconfig.TestSuiteRef{{Name: "nonexistent"}}},
+					Tests: &projectconfig.ImageTestsConfig{TestSuites: []projectconfig.TestSuiteRef{{Name: "nonexistent"}}},
 				},
 			},
 			TestSuites:        make(map[string]projectconfig.TestSuiteConfig),

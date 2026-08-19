@@ -30,7 +30,7 @@ type ImageConfig struct {
 
 	// Tests holds the test configuration for this image, including which test suites
 	// apply to it.
-	Tests ImageTestsConfig `toml:"tests,omitempty" json:"tests,omitempty" jsonschema:"title=Tests,description=Test configuration for this image"`
+	Tests *ImageTestsConfig `toml:"tests,omitempty" json:"tests,omitempty" jsonschema:"title=Tests,description=Test configuration for this image"`
 
 	// Publish holds the publish settings for this image.
 	Publish ImagePublishConfig `toml:"publish,omitempty" json:"publish,omitempty" jsonschema:"title=Publish settings,description=Publishing settings for this image"`
@@ -61,6 +61,20 @@ type ImageCapabilities struct {
 	// RuntimePackageManagement indicates whether the image supports installing or
 	// removing packages at runtime (e.g., via dnf/tdnf).
 	RuntimePackageManagement *bool `toml:"runtime-package-management,omitempty" json:"runtimePackageManagement,omitempty" jsonschema:"title=Runtime package management,description=Whether the image supports installing or removing packages at runtime"`
+
+	// WSL indicates whether the image runs under the Windows Subsystem for Linux
+	// runtime, rather than being booted as a VM/bare-metal machine.
+	WSL *bool `toml:"wsl,omitempty" json:"wsl,omitempty" jsonschema:"title=WSL,description=Whether the image runs under the Windows Subsystem for Linux runtime"`
+
+	// InstallerMedia indicates whether the image is installer media (e.g. an ISO) that
+	// installs another OS, rather than a directly runnable/bootable end-state image.
+	InstallerMedia *bool `toml:"installer-media,omitempty" json:"installerMedia,omitempty" jsonschema:"title=Installer media,description=Whether the image is installer media that installs another OS rather than a directly runnable end-state image"`
+
+	// FipsEnabled indicates whether the image is built/configured to run in FIPS mode.
+	FipsEnabled *bool `toml:"fips-enabled,omitempty" json:"fipsEnabled,omitempty" jsonschema:"title=FIPS enabled,description=Whether the image is built or configured to run in FIPS mode"`
+
+	// CVM indicates whether the image supports running as a Confidential VM (CVM).
+	CVM *bool `toml:"cvm,omitempty" json:"cvm,omitempty" jsonschema:"title=Confidential VM,description=Whether the image supports running as a Confidential VM (CVM)"`
 }
 
 // IsMachineBootable returns true if the image is explicitly marked as machine-bootable.
@@ -85,6 +99,26 @@ func (c *ImageCapabilities) IsRuntimePackageManagement() bool {
 	return c.RuntimePackageManagement != nil && *c.RuntimePackageManagement
 }
 
+// IsWSL returns true if the image explicitly runs under the WSL runtime.
+func (c *ImageCapabilities) IsWSL() bool {
+	return c.WSL != nil && *c.WSL
+}
+
+// IsInstallerMedia returns true if the image is explicitly marked as installer media.
+func (c *ImageCapabilities) IsInstallerMedia() bool {
+	return c.InstallerMedia != nil && *c.InstallerMedia
+}
+
+// IsFipsEnabled returns true if the image is explicitly marked as FIPS-enabled.
+func (c *ImageCapabilities) IsFipsEnabled() bool {
+	return c.FipsEnabled != nil && *c.FipsEnabled
+}
+
+// IsCVM returns true if the image explicitly supports running as a Confidential VM.
+func (c *ImageCapabilities) IsCVM() bool {
+	return c.CVM != nil && *c.CVM
+}
+
 // EnabledNames returns the TOML field names of capabilities that are explicitly set to
 // true, in a stable order matching the struct field declaration order.
 func (c *ImageCapabilities) EnabledNames() []string {
@@ -106,6 +140,22 @@ func (c *ImageCapabilities) EnabledNames() []string {
 		names = append(names, "runtime-package-management")
 	}
 
+	if c.IsWSL() {
+		names = append(names, "wsl")
+	}
+
+	if c.IsInstallerMedia() {
+		names = append(names, "installer-media")
+	}
+
+	if c.IsFipsEnabled() {
+		names = append(names, "fips-enabled")
+	}
+
+	if c.IsCVM() {
+		names = append(names, "cvm")
+	}
+
 	return names
 }
 
@@ -115,6 +165,11 @@ type ImageTestsConfig struct {
 	// reference identifies a test suite defined in the top-level [test-suites] section
 	// and may carry per-test metadata in the future (e.g., required vs optional).
 	TestSuites []TestSuiteRef `toml:"test-suites,omitempty" json:"testSuites,omitempty" jsonschema:"title=Test Suites,description=List of test suite references that apply to this image"`
+
+	// Tests is the new-shape list of test or test-group references that apply to this
+	// image. References must resolve to entries in the project-level [tests] or
+	// [test-groups] maps; resolution is the responsibility of the test layer.
+	Tests []TestRef `toml:"tests,omitempty" json:"tests,omitempty" jsonschema:"title=Tests,description=List of test or test-group references that apply to this image"`
 }
 
 // TestSuiteRef is a reference to a named test suite. Using a structured type (rather than
@@ -126,6 +181,10 @@ type TestSuiteRef struct {
 
 // TestNames returns the test suite names referenced by this image.
 func (i *ImageConfig) TestNames() []string {
+	if i.Tests == nil {
+		return nil
+	}
+
 	names := make([]string, len(i.Tests.TestSuites))
 	for idx, ref := range i.Tests.TestSuites {
 		names[idx] = ref.Name

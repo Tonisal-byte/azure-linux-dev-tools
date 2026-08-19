@@ -122,6 +122,45 @@ key = "value"
 	assert.Equal(t, "/project/artifacts/logs", config.Project.LogDir)
 }
 
+func TestLoadAndResolveProjectConfig_TestReferencesResolvedAcrossIncludedFiles(t *testing.T) {
+	testFiles := []struct {
+		path     string
+		contents string
+	}{
+		{testConfigPath, `
+includes = ["components.toml", "tests.toml"]
+`},
+		{"/project/components.toml", `
+[components.bash]
+tests.tests = [{ name = "bash-fedora-shell" }]
+`},
+		{"/project/tests.toml", `
+[tests.bash-fedora-shell]
+type = "tmt"
+kind = "functional"
+
+[tests.bash-fedora-shell.tmt]
+plan = "/plans/shell"
+
+[tests.bash-fedora-shell.tmt.source]
+git-url = "https://example.com/tmt-tests.git"
+ref = "0123456789abcdef0123456789abcdef01234567"
+`},
+	}
+
+	ctx := testctx.NewCtx()
+	for _, testFile := range testFiles {
+		require.NoError(t, fileutils.MkdirAll(ctx.FS(), filepath.Dir(testFile.path)))
+		require.NoError(t, fileutils.WriteFile(ctx.FS(), testFile.path, []byte(testFile.contents), fileperms.PrivateFile))
+	}
+
+	config, err := loadAndResolveProjectConfig(ctx.FS(), false, testConfigPath)
+	require.NoError(t, err)
+	require.Contains(t, config.Components, "bash")
+	require.Contains(t, config.Tests, "bash-fedora-shell")
+	assert.Equal(t, TestKindFunctional, config.Tests["bash-fedora-shell"].Kind)
+}
+
 func TestLoadAndResolveProjectConfig_PermissiveParsing_IgnoresValidationError(t *testing.T) {
 	// This config is structurally valid TOML but fails semantic validation: the
 	// component group references a component that is not defined.
@@ -1245,6 +1284,7 @@ test-suites = [{ name = "smoke" }]
 	require.NoError(t, err)
 
 	if assert.Contains(t, config.Images, "myimage") {
+		require.NotNil(t, config.Images["myimage"].Tests)
 		assert.Equal(t, []TestSuiteRef{{Name: "smoke"}}, config.Images["myimage"].Tests.TestSuites)
 	}
 }
@@ -1265,6 +1305,54 @@ test-suites = [{ name = "nonexistent" }]
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrUndefinedTestSuite)
 	assert.Contains(t, err.Error(), "nonexistent")
+}
+
+func TestLoadAndResolveProjectConfig_ImageCapabilities_FipsEnabledAndCVM(t *testing.T) {
+	const configContents = `
+[images.myimage]
+description = "Test image"
+
+[images.myimage.capabilities]
+machine-bootable = true
+fips-enabled = true
+cvm = true
+`
+
+	ctx := testctx.NewCtx()
+	require.NoError(t, fileutils.WriteFile(ctx.FS(), testConfigPath, []byte(configContents), fileperms.PrivateFile))
+
+	config, err := loadAndResolveProjectConfig(ctx.FS(), false, testConfigPath)
+	require.NoError(t, err)
+
+	if assert.Contains(t, config.Images, "myimage") {
+		caps := config.Images["myimage"].Capabilities
+		assert.True(t, caps.IsFipsEnabled())
+		assert.True(t, caps.IsCVM())
+		assert.Contains(t, caps.EnabledNames(), "fips-enabled")
+		assert.Contains(t, caps.EnabledNames(), "cvm")
+	}
+}
+
+func TestLoadAndResolveProjectConfig_TestDefinitionMetricsEnabled(t *testing.T) {
+	const configContents = `
+[tests.smoke-test]
+type = "lisa"
+description = "Smoke test"
+metrics-enabled = true
+
+[tests.smoke-test.lisa]
+name = "smoke_test"
+`
+
+	ctx := testctx.NewCtx()
+	require.NoError(t, fileutils.WriteFile(ctx.FS(), testConfigPath, []byte(configContents), fileperms.PrivateFile))
+
+	config, err := loadAndResolveProjectConfig(ctx.FS(), false, testConfigPath)
+	require.NoError(t, err)
+
+	if assert.Contains(t, config.Tests, "smoke-test") {
+		assert.True(t, config.Tests["smoke-test"].MetricsEnabled)
+	}
 }
 
 // TestLoadAndResolveProjectConfig_DeprecatedChannelField_DefaultPackageConfig verifies that the

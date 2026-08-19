@@ -66,6 +66,12 @@ type ConfigFile struct {
 	// Definitions of test suites.
 	TestSuites map[string]TestSuiteConfig `toml:"test-suites,omitempty" validate:"dive" jsonschema:"title=Test Suites,description=Definitions of test suites for this project"`
 
+	// Definitions of individual tests (new schema, [tests.X]).
+	Tests map[string]TestDefinition `toml:"tests,omitempty" validate:"dive" jsonschema:"title=Tests,description=Definitions of individual tests"`
+
+	// Definitions of test groups (new schema, [test-groups.X]).
+	TestGroups map[string]TestGroup `toml:"test-groups,omitempty" validate:"dive" jsonschema:"title=Test Groups,description=Definitions of named bundles of tests"`
+
 	// Internal fields used to track the origin of the config file; `dir` is the directory
 	// that the config file's relative paths are based from.
 	sourcePath string `toml:"-"`
@@ -136,8 +142,19 @@ func (f ConfigFile) Validate() error {
 		}
 	}
 
-	// Validate test suite configurations.
-	for suiteName, suite := range f.TestSuites {
+	if err := validateTestSuites(f.TestSuites); err != nil {
+		return err
+	}
+
+	if err := validateTestDefinitions(f.Tests); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateTestSuites(testSuites map[string]TestSuiteConfig) error {
+	for suiteName, suite := range testSuites {
 		// Suite names are used as path components (e.g., for the per-suite venv directory),
 		// so reject anything that could escape the intended directory or otherwise be unsafe
 		// across platforms.
@@ -155,6 +172,16 @@ func (f ConfigFile) Validate() error {
 	return nil
 }
 
+func validateTestDefinitions(tests map[string]TestDefinition) error {
+	for testName, testDef := range tests {
+		if err := testDef.Validate(testName); err != nil {
+			return fmt.Errorf("invalid test %#q:\n%w", testName, err)
+		}
+	}
+
+	return nil
+}
+
 // validateComponentGroupMetadata validates the optional documentation metadata declared
 // on each component group.
 func validateComponentGroupMetadata(groups map[string]ComponentGroupConfig) error {
@@ -165,6 +192,185 @@ func validateComponentGroupMetadata(groups map[string]ComponentGroupConfig) erro
 
 		if err := group.Metadata.Validate(); err != nil {
 			return fmt.Errorf("invalid metadata on component group %#q:\n%w", groupName, err)
+		}
+	}
+
+	return nil
+}
+
+func validateNewTestReferences(
+	tests map[string]TestDefinition,
+	groups map[string]TestGroup,
+	components map[string]ComponentConfig,
+	images map[string]ImageConfig,
+) error {
+	for groupName, group := range groups {
+		scope := fmt.Sprintf("test-group %#q tests", groupName)
+		if err := validateTestGroupMembers(scope, group.Tests, tests); err != nil {
+			return err
+		}
+	}
+
+	for componentName, component := range components {
+		if component.Tests == nil {
+			continue
+		}
+
+		scope := fmt.Sprintf("component %#q tests.tests", componentName)
+		if err := validateTestRefList(scope, component.Tests.Tests, tests, groups); err != nil {
+			return err
+		}
+	}
+
+	for imageName, image := range images {
+		if image.Tests == nil {
+			continue
+		}
+
+		scope := fmt.Sprintf("image %#q tests.tests", imageName)
+		if err := validateTestRefList(scope, image.Tests.Tests, tests, groups); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateTestGroupMembers(
+	scope string,
+	refs []TestRef,
+	tests map[string]TestDefinition,
+) error {
+	seenRefs := make(map[string]int, len(refs))
+
+	for idx, ref := range refs {
+		hasName := ref.Name != ""
+		hasGroup := ref.Group != ""
+
+		if hasName == hasGroup {
+			return fmt.Errorf(
+				"%w: %s[%d] must set exactly one of 'name' or 'group'",
+				ErrInvalidTestRef,
+				scope,
+				idx,
+			)
+		}
+
+		if hasGroup {
+			return fmt.Errorf(
+				"%w: %s[%d].group is not allowed in [test-groups]; use .name to reference a [tests] entry",
+				ErrNestedTestGroupReference,
+				scope,
+				idx,
+			)
+		}
+
+		if _, ok := tests[ref.Name]; !ok {
+			return fmt.Errorf(
+				"%w: %s[%d].name references undefined test %#q",
+				ErrUndefinedTest,
+				scope,
+				idx,
+				ref.Name,
+			)
+		}
+
+		refKey := "name:" + ref.Name
+		if firstIdx, exists := seenRefs[refKey]; exists {
+			return fmt.Errorf(
+				"%w: %s[%d] duplicates %s[%d] (%#q)",
+				ErrDuplicateTestRef,
+				scope,
+				idx,
+				scope,
+				firstIdx,
+				ref.Name,
+			)
+		}
+
+		seenRefs[refKey] = idx
+	}
+
+	return nil
+}
+
+func validateTestRefList(
+	scope string,
+	refs []TestRef,
+	tests map[string]TestDefinition,
+	groups map[string]TestGroup,
+) error {
+	// seenTests maps a resolved (post-group-expansion) test name to a description of
+	// the ref that first contributed it, so that a name ref and a group ref (or two
+	// group refs) which both resolve to the same underlying test are caught, not just
+	// two textually-identical refs.
+	seenTests := make(map[string]string, len(refs))
+
+	checkDuplicate := func(testName, desc string) error {
+		if firstDesc, exists := seenTests[testName]; exists {
+			return fmt.Errorf(
+				"%w: %s duplicates %s (both resolve to test %#q)",
+				ErrDuplicateTestRef,
+				desc,
+				firstDesc,
+				testName,
+			)
+		}
+
+		seenTests[testName] = desc
+
+		return nil
+	}
+
+	for idx, ref := range refs {
+		hasName := ref.Name != ""
+		hasGroup := ref.Group != ""
+
+		if hasName == hasGroup {
+			return fmt.Errorf(
+				"%w: %s[%d] must set exactly one of 'name' or 'group'",
+				ErrInvalidTestRef,
+				scope,
+				idx,
+			)
+		}
+
+		if hasName {
+			if _, ok := tests[ref.Name]; !ok {
+				return fmt.Errorf(
+					"%w: %s[%d].name references undefined test %#q",
+					ErrUndefinedTest,
+					scope,
+					idx,
+					ref.Name,
+				)
+			}
+
+			desc := fmt.Sprintf("%s[%d] (name=%#q)", scope, idx, ref.Name)
+			if err := checkDuplicate(ref.Name, desc); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		group, ok := groups[ref.Group]
+		if !ok {
+			return fmt.Errorf(
+				"%w: %s[%d].group references undefined test-group %#q",
+				ErrUndefinedTestGroup,
+				scope,
+				idx,
+				ref.Group,
+			)
+		}
+
+		desc := fmt.Sprintf("%s[%d] (group=%#q)", scope, idx, ref.Group)
+
+		for _, groupRef := range group.Tests {
+			if err := checkDuplicate(groupRef.Name, desc); err != nil {
+				return err
+			}
 		}
 	}
 

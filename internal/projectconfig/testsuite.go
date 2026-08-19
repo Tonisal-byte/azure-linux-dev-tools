@@ -24,15 +24,40 @@ const (
 var (
 	// ErrDuplicateTestSuites is returned when duplicate conflicting test suite definitions are found.
 	ErrDuplicateTestSuites = errors.New("duplicate test suite")
+	// ErrDuplicateTests is returned when duplicate conflicting [tests] entries are found.
+	ErrDuplicateTests = errors.New("duplicate test")
+	// ErrDuplicateTestGroups is returned when duplicate conflicting [test-groups] entries are found.
+	ErrDuplicateTestGroups = errors.New("duplicate test group")
 	// ErrUnknownTestType is returned for unrecognized test types.
 	ErrUnknownTestType = errors.New("unknown test type")
 	// ErrMissingTestField is returned when a required test config field is missing.
 	ErrMissingTestField = errors.New("missing required test field")
 	// ErrUndefinedTestSuite is returned when an image references a test suite name that is not defined.
 	ErrUndefinedTestSuite = errors.New("undefined test suite reference")
+	// ErrUndefinedTest is returned when a test reference points to a missing [tests] entry.
+	ErrUndefinedTest = errors.New("undefined test reference")
+	// ErrUndefinedTestGroup is returned when a test reference points to a missing [test-groups] entry.
+	ErrUndefinedTestGroup = errors.New("undefined test group reference")
+	// ErrInvalidTestRef is returned when a TestRef has neither or both of name/group set.
+	ErrInvalidTestRef = errors.New("invalid test reference")
+	// ErrDuplicateTestRef is returned when a list contains the same test ref more than once.
+	ErrDuplicateTestRef = errors.New("duplicate test reference")
+	// ErrContradictingImageCapabilities is returned when mutually exclusive image
+	// capability fields are simultaneously set to true.
+	ErrContradictingImageCapabilities = errors.New("contradicting image capabilities")
+	// ErrNestedTestGroupReference is returned when a [test-groups] member uses a group ref.
+	ErrNestedTestGroupReference = errors.New("nested test group reference")
 	// ErrMismatchedTestSubtable is returned when a test config has a subtable that does not
 	// match its declared type.
 	ErrMismatchedTestSubtable = errors.New("mismatched test subtable")
+	// ErrUnknownTestKind is returned for unrecognized test kinds.
+	ErrUnknownTestKind = errors.New("unknown test kind")
+	// ErrInvalidLisaSelection is returned when a lisa test has invalid or missing selectors.
+	ErrInvalidLisaSelection = errors.New("invalid lisa selection")
+	// ErrInvalidTmtConfig is returned when a tmt test has invalid or missing configuration.
+	ErrInvalidTmtConfig = errors.New("invalid tmt configuration")
+	// ErrInvalidPytestConfig is returned when a pytest test has invalid or missing configuration.
+	ErrInvalidPytestConfig = errors.New("invalid pytest configuration")
 	// ErrInvalidInstallMode is returned when a [PytestConfig.Install] value is not recognized.
 	ErrInvalidInstallMode = errors.New("invalid install mode")
 	// ErrInvalidGitRef is returned when a git ref is not a valid hex commit SHA.
