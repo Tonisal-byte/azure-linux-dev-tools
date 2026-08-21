@@ -12,6 +12,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestHasExplicitComponentSelection pins the NEW-1 fix: only an exact name or
@@ -254,6 +255,25 @@ func TestCollectCustomizationsEmitsEveryKind(t *testing.T) {
 			"collectCustomizations did not emit an item of Kind %q; "+
 				"a collector for it may be unwired or its trigger condition wrong", kind)
 	}
+}
+
+func TestCollectCustomizationsUsesEffectiveScriptName(t *testing.T) {
+	t.Parallel()
+
+	config := projectconfig.ComponentConfig{
+		SourceFiles: []projectconfig.SourceFileReference{{
+			Filename: "generated.tar.gz",
+			Origin: projectconfig.Origin{
+				Type:   projectconfig.OriginTypeCustom,
+				Script: "/project/components/generate.sh",
+			},
+		}},
+	}
+
+	items := collectCustomizations("comp", &config)
+
+	require.Len(t, items, 2)
+	assert.Equal(t, CustomizationItem{Kind: "source-files.script", Value: "generate.sh"}, items[1])
 }
 
 // TestFingerprintChangeDTOMirrorsSource guards the direction the explicit

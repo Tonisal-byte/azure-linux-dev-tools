@@ -116,6 +116,34 @@ func TestCustomFileSourceProvider_GetFile_MissingScriptReturnsError(t *testing.T
 	assert.NotErrorIs(t, err, ErrNotFound)
 }
 
+func TestCustomFileSourceProvider_GetFile_AbsoluteMissingScriptUsesNormalizedPath(t *testing.T) {
+	ctx := testctx.NewCtx()
+
+	provider := &customFileSourceProvider{
+		dryRunnable: ctx,
+		fs:          ctx.FS(),
+		runner:      nil, // never reached - script stat check fails first
+	}
+
+	ctrl := gomock.NewController(t)
+	comp := components_testutils.NewMockComponent(ctrl)
+	comp.EXPECT().GetName().Return("yara").AnyTimes()
+
+	ref := projectconfig.SourceFileReference{
+		Filename: "gen.tar.gz",
+		Origin: projectconfig.Origin{
+			Type:   projectconfig.OriginTypeCustom,
+			Script: "/project/base/gen.sh",
+		},
+	}
+
+	err := provider.GetFile(context.Background(), comp, ref, "/output")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "generation script")
+	assert.Contains(t, err.Error(), "gen.sh")
+	assert.Contains(t, err.Error(), "/project/base/gen.sh")
+}
+
 func TestResolveComponentSpecDir_LocalComponent(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	comp := components_testutils.NewMockComponent(ctrl)

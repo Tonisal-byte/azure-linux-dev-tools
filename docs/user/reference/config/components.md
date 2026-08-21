@@ -392,11 +392,13 @@ Use `origin.type = "custom"` when a source archive must be assembled or modified
 
 Custom sources are regenerated on every source preparation rather than restored from lookaside. The generated archive is validated against its configured hash, so changes to the script or its inputs fail with a hash mismatch until the hash is intentionally refreshed.
 
+For an upstream component, each script filename is resolved relative to the TOML file that declares that `source-files` entry. This remains true when the component is assembled from multiple included configuration files. For a local component, the script remains a sidecar beside the component's spec file.
+
 The `script`, `mock-packages`, and `inputs` fields are nested under `[origin]`:
 
 | Field | TOML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
-| Script | `origin.script` | string | **Yes** | Script filename (relative to the component's spec dir) to run in mock. Required for `origin.type = "custom"`. |
+| Script | `origin.script` | string | **Yes** | Script filename to run in mock. Relative to the declaring TOML file for upstream components, or the spec directory for local components. Required for `origin.type = "custom"`. |
 | Mock packages | `origin.mock-packages` | array of string | No | Extra RPM packages to install in the mock chroot before the script runs. |
 | Inputs | `origin.inputs` | array of string | No | Unique filenames to make available in the mock chroot before the script runs. Each file must already be present in the fetched source output directory — upstream source tarballs, sidecar files (patches, scripts), and any earlier `source-files` entries are all placed there by the upstream fetch before custom scripts run. |
 
@@ -408,7 +410,7 @@ filename  = "yara-4.5.4-azl-stripped.tar.gz"
 hash-type = "SHA512"
 hash      = "abc123..."               # from: prep-sources --allow-no-hashes
 origin.type          = "custom"
-origin.script        = "gen-yara-stripped.sh"    # relative to the component's spec directory
+origin.script        = "gen-yara-stripped.sh"    # beside this TOML file for an upstream component
 origin.mock-packages = ["cmake"]                 # omit if not needed
 origin.inputs        = ["yara-4.5.4.tar.gz"]     # available to the script as ./yara-4.5.4.tar.gz
 ```

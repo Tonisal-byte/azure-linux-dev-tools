@@ -230,10 +230,10 @@ func appendSourceFileItems(
 			})
 		}
 
-		if sourceFile.Origin.Script != "" {
+		if scriptName := sourceFile.Origin.EffectiveScriptName(); scriptName != "" {
 			items = append(items, CustomizationItem{
 				Kind:  "source-files.script",
-				Value: sourceFile.Origin.Script,
+				Value: scriptName,
 			})
 		}
 

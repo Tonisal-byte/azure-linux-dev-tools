@@ -28,6 +28,17 @@ func TestDumpConfig(t *testing.T) {
 			WorkDir:   testWorkDir,
 			OutputDir: testOutputDir,
 		},
+		Components: map[string]projectconfig.ComponentConfig{
+			"example": {
+				SourceFiles: []projectconfig.SourceFileReference{{
+					Filename: "generated.tar.gz",
+					Origin: projectconfig.Origin{
+						Type:   projectconfig.OriginTypeCustom,
+						Script: "/project/components/generate.sh",
+					},
+				}},
+			},
+		},
 	}
 
 	ctx, cancelFunc := context.WithCancel(t.Context())
@@ -47,8 +58,14 @@ func TestDumpConfig(t *testing.T) {
 	configText, err := config.DumpConfig(env, config.ConfigDumpFormatTOML)
 	require.NoError(t, err)
 	require.NotEmpty(t, configText)
+	require.Contains(t, configText, "generate.sh")
+	require.NotContains(t, configText, "/project/components")
 
 	configText, err = config.DumpConfig(env, config.ConfigDumpFormatJSON)
 	require.NoError(t, err)
 	require.NotEmpty(t, configText)
+	require.Contains(t, configText, "generate.sh")
+	require.NotContains(t, configText, "/project/components")
+	require.Equal(t, "/project/components/generate.sh",
+		cfg.Components["example"].SourceFiles[0].Origin.Script)
 }

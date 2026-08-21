@@ -382,6 +382,44 @@ func TestComputeIdentity_SourceFilesChange(t *testing.T) {
 	assert.NotEqual(t, fp1, fp2, "different source file hash must produce different fingerprints")
 }
 
+func TestComputeIdentity_CustomScriptPathIsCheckoutIndependent(t *testing.T) {
+	ctx := newTestFS(t, map[string]string{
+		"/specs/test.spec": "Name: testpkg\nVersion: 1.0",
+	})
+
+	comp1 := baseComponent()
+	comp1.SourceFiles = []projectconfig.SourceFileReference{{
+		Filename: "source.tar.gz",
+		Hash:     "aaa111",
+		HashType: fileutils.HashTypeSHA256,
+		Origin: projectconfig.Origin{
+			Type:   projectconfig.OriginTypeCustom,
+			Script: "/home/user1/repo/generate.sh",
+		},
+	}}
+
+	comp2 := comp1
+	comp2.SourceFiles = []projectconfig.SourceFileReference{{
+		Filename: "source.tar.gz",
+		Hash:     "aaa111",
+		HashType: fileutils.HashTypeSHA256,
+		Origin: projectconfig.Origin{
+			Type:   projectconfig.OriginTypeCustom,
+			Script: "/home/user2/repo/generate.sh",
+		},
+	}}
+
+	fp1 := computeFingerprint(t, ctx, comp1, testReleaseVer, 0)
+	fp2 := computeFingerprint(t, ctx, comp2, testReleaseVer, 0)
+
+	assert.Equal(t, fp1, fp2)
+	assert.Equal(t, "/home/user1/repo/generate.sh", comp1.SourceFiles[0].Origin.Script)
+
+	comp2.SourceFiles[0].Origin.Script = "/home/user2/repo/different.sh"
+	fp2 = computeFingerprint(t, ctx, comp2, testReleaseVer, 0)
+	assert.NotEqual(t, fp1, fp2)
+}
+
 func TestComputeIdentity_SourceFileOriginExcluded(t *testing.T) {
 	ctx := newTestFS(t, map[string]string{
 		"/specs/test.spec": "Name: testpkg\nVersion: 1.0",

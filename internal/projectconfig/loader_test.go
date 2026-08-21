@@ -590,6 +590,52 @@ upstream-commit = "bbb2222"
 	assert.Equal(t, "/project/sub", comp.SourceConfigFile.dir)
 }
 
+func TestLoadAndResolveProjectConfig_MergeComponentsPreservesCustomScriptDirectories(t *testing.T) {
+	testFiles := []struct {
+		path     string
+		contents string
+	}{
+		{testConfigPath, `
+includes = ["sub/include.toml"]
+
+[components.example.spec]
+type = "upstream"
+
+[[components.example.source-files]]
+filename = "base-generated.tar.gz"
+origin.type = "custom"
+origin.script = "generate-base.sh"
+`},
+		{"/project/sub/include.toml", `
+[components.example.spec]
+type = "upstream"
+upstream-commit = "abc1234"
+
+[[components.example.source-files]]
+filename = "included-generated.tar.gz"
+origin.type = "custom"
+origin.script = "generate-included.sh"
+`},
+	}
+
+	ctx := testctx.NewCtx()
+
+	for _, testFile := range testFiles {
+		require.NoError(t, fileutils.MkdirAll(ctx.FS(), filepath.Dir(testFile.path)))
+		require.NoError(t, fileutils.WriteFile(ctx.FS(), testFile.path, []byte(testFile.contents), fileperms.PrivateFile))
+	}
+
+	config, err := loadAndResolveProjectConfig(ctx.FS(), false, testFiles[0].path)
+	require.NoError(t, err)
+
+	component := config.Components["example"]
+	require.Len(t, component.SourceFiles, 2)
+	assert.Equal(t, "/project/generate-base.sh", component.SourceFiles[0].Origin.Script)
+	assert.Equal(t, "/project/sub/generate-included.sh", component.SourceFiles[1].Origin.Script)
+	require.NotNil(t, component.SourceConfigFile)
+	assert.Equal(t, "/project/sub", component.SourceConfigFile.dir)
+}
+
 func TestLoadAndResolveProjectConfig_MergeComponentsMultipleComponents(t *testing.T) {
 	// When two files define different components, both should be present.
 	// When they also share a component, that component should be merged.

@@ -6,6 +6,7 @@ package projectconfig
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -84,6 +85,15 @@ type Origin struct {
 	// before it runs. Each entry must be a plain filename. Only valid when
 	// [Origin.Type] is 'custom'.
 	Inputs []string `toml:"inputs,omitempty" json:"inputs,omitempty" jsonschema:"title=Inputs,description=Source-output filenames to make available next to the generation script before it runs. Only valid when origin type is 'custom'."`
+}
+
+// EffectiveScriptName returns the checkout-independent filename of [Origin.Script].
+func (o Origin) EffectiveScriptName() string {
+	if o.Script == "" {
+		return ""
+	}
+
+	return filepath.Base(o.Script)
 }
 
 // HashInclude implements the hashstructure [Includable] interface so that
@@ -538,6 +548,18 @@ func (c *ComponentConfig) WithAbsolutePaths(referenceDir string) *ComponentConfi
 
 	// Fix up paths.
 	result.Spec.Path = makeAbsolute(referenceDir, result.Spec.Path)
+
+	scriptDir := referenceDir
+	if result.Spec.SourceType == SpecSourceTypeLocal && result.Spec.Path != "" {
+		scriptDir = filepath.Dir(result.Spec.Path)
+	}
+
+	for i := range result.SourceFiles {
+		origin := &result.SourceFiles[i].Origin
+		if origin.Type == OriginTypeCustom {
+			origin.Script = makeAbsolute(scriptDir, origin.Script)
+		}
+	}
 
 	// Copy and fix up overlays.
 	if c.Overlays != nil {

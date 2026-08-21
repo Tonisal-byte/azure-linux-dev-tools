@@ -6,8 +6,11 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev"
+	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -97,16 +100,18 @@ issues or inspecting effective values.`,
 }
 
 func DumpConfig(env *azldev.Env, format configDumpFormat) (string, error) {
+	config := portableConfigCopy(env.Config())
+
 	switch format {
 	case ConfigDumpFormatTOML:
-		tomlBytes, err := toml.Marshal(env.Config())
+		tomlBytes, err := toml.Marshal(config)
 		if err != nil {
 			return "", fmt.Errorf("failed to serialize config to TOML:\n%w", err)
 		}
 
 		return string(tomlBytes), nil
 	case ConfigDumpFormatJSON:
-		jsonBytes, err := json.MarshalIndent(env.Config(), "", "  ")
+		jsonBytes, err := json.MarshalIndent(config, "", "  ")
 		if err != nil {
 			return "", fmt.Errorf("failed to serialize config to JSON:\n%w", err)
 		}
@@ -114,5 +119,43 @@ func DumpConfig(env *azldev.Env, format configDumpFormat) (string, error) {
 		return string(jsonBytes), nil
 	default:
 		return "", fmt.Errorf("unsupported format: %#q", format)
+	}
+}
+
+func portableConfigCopy(config *projectconfig.ProjectConfig) *projectconfig.ProjectConfig {
+	result := *config
+
+	result.Components = maps.Clone(config.Components)
+	for name, component := range result.Components {
+		normalizeCustomScriptNames(&component)
+		result.Components[name] = component
+	}
+
+	normalizeCustomScriptNames(&result.DefaultComponentConfig)
+
+	result.ComponentGroups = maps.Clone(config.ComponentGroups)
+	for name, group := range result.ComponentGroups {
+		normalizeCustomScriptNames(&group.DefaultComponentConfig)
+		result.ComponentGroups[name] = group
+	}
+
+	result.Distros = maps.Clone(config.Distros)
+	for distroName, distro := range result.Distros {
+		distro.Versions = maps.Clone(distro.Versions)
+		for versionName, version := range distro.Versions {
+			normalizeCustomScriptNames(&version.DefaultComponentConfig)
+			distro.Versions[versionName] = version
+		}
+
+		result.Distros[distroName] = distro
+	}
+
+	return &result
+}
+
+func normalizeCustomScriptNames(component *projectconfig.ComponentConfig) {
+	component.SourceFiles = slices.Clone(component.SourceFiles)
+	for i := range component.SourceFiles {
+		component.SourceFiles[i].Origin.Script = component.SourceFiles[i].Origin.EffectiveScriptName()
 	}
 }

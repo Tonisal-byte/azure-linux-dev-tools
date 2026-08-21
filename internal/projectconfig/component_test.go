@@ -4,6 +4,7 @@
 package projectconfig_test
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -108,6 +109,94 @@ func TestComponentConfigWithAbsolutePaths(t *testing.T) {
 		require.Equal(t, comp.Overlays[0].Type, absComp.Overlays[0].Type)
 		require.Equal(t, filepath.Join(testRefDir, comp.Overlays[0].Source), absComp.Overlays[0].Source)
 	})
+
+	t.Run("custom source scripts", func(t *testing.T) {
+		comp := projectconfig.ComponentConfig{
+			Spec: projectconfig.SpecSource{SourceType: projectconfig.SpecSourceTypeUpstream},
+			SourceFiles: []projectconfig.SourceFileReference{
+				{
+					Filename: "generated.tar.gz",
+					Origin: projectconfig.Origin{
+						Type:   projectconfig.OriginTypeCustom,
+						Script: "generate.sh",
+					},
+				},
+				{
+					Filename: "downloaded.tar.gz",
+					Origin: projectconfig.Origin{
+						Type:   projectconfig.OriginTypeURI,
+						Script: "unchanged.sh",
+					},
+				},
+			},
+		}
+
+		absComp := comp.WithAbsolutePaths(testRefDir)
+
+		assert.Equal(t, filepath.Join(testRefDir, "generate.sh"), absComp.SourceFiles[0].Origin.Script)
+		assert.Equal(t, "unchanged.sh", absComp.SourceFiles[1].Origin.Script)
+		assert.Equal(t, "generate.sh", comp.SourceFiles[0].Origin.Script)
+	})
+
+	t.Run("local custom source script", func(t *testing.T) {
+		comp := projectconfig.ComponentConfig{
+			Spec: projectconfig.SpecSource{
+				SourceType: projectconfig.SpecSourceTypeLocal,
+				Path:       "specs/test.spec",
+			},
+			SourceFiles: []projectconfig.SourceFileReference{{
+				Filename: "generated.tar.gz",
+				Origin: projectconfig.Origin{
+					Type:   projectconfig.OriginTypeCustom,
+					Script: "generate.sh",
+				},
+			}},
+		}
+
+		absComp := comp.WithAbsolutePaths(testRefDir)
+
+		assert.Equal(t, filepath.Join(testRefDir, "specs", "generate.sh"), absComp.SourceFiles[0].Origin.Script)
+	})
+}
+
+func TestOriginEffectiveScriptName(t *testing.T) {
+	tests := []struct {
+		name     string
+		script   string
+		expected string
+	}{
+		{name: "empty", script: "", expected: ""},
+		{name: "relative", script: "generate.sh", expected: "generate.sh"},
+		{name: "absolute", script: "/project/components/generate.sh", expected: "generate.sh"},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			origin := projectconfig.Origin{Script: testCase.script}
+
+			assert.Equal(t, testCase.expected, origin.EffectiveScriptName())
+		})
+	}
+}
+
+func TestOriginMarshalJSONUsesEffectiveScriptName(t *testing.T) {
+	origin := projectconfig.Origin{
+		Type:         projectconfig.OriginTypeCustom,
+		Script:       "/project/components/generate.sh",
+		MockPackages: []string{"golang"},
+		Inputs:       []string{"source.tar.gz"},
+	}
+
+	data, err := json.Marshal(origin)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"type": "custom",
+		"script": "generate.sh",
+		"mockPackages": ["golang"],
+		"inputs": ["source.tar.gz"]
+	}`, string(data))
+	assert.NotContains(t, string(data), "/project/components")
 }
 
 func TestComponentGroupConfigWithAbsolutePaths_DefaultComponentConfig(t *testing.T) {

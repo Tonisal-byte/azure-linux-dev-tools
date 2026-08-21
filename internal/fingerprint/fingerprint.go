@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -107,6 +108,13 @@ func ComputeIdentity(
 	}
 
 	// 3. Hash the resolved config struct (excluding fingerprint:"-" fields).
+	// Script paths are absolute internally so merged definitions retain their
+	// declaration context; hash only their checkout-independent filenames.
+	component.SourceFiles = slices.Clone(component.SourceFiles)
+	for i := range component.SourceFiles {
+		component.SourceFiles[i].Origin.Script = component.SourceFiles[i].Origin.EffectiveScriptName()
+	}
+
 	configHash, err := hashstructure.Hash(component, hashstructure.FormatV2, &hashstructure.HashOptions{
 		TagName: hashstructureTagName,
 	})

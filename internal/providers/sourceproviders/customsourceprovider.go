@@ -80,9 +80,11 @@ func generateCustomSourceFile(
 	ref *projectconfig.SourceFileReference,
 	destPath string,
 ) error {
+	scriptName := ref.Origin.EffectiveScriptName()
+
 	slog.Info("Generating custom source file",
 		"filename", ref.Filename,
-		"script", ref.Origin.Script,
+		"script", scriptName,
 		"component", component.GetName())
 
 	if dryRunnable.DryRun() {
@@ -91,21 +93,19 @@ func generateCustomSourceFile(
 		return nil
 	}
 
-	specDir, err := resolveComponentSpecDir(component)
+	// Verify the generation script is present before spinning up a mock chroot.
+	scriptHostPath, err := resolveCustomScriptHostPath(component, ref.Origin.Script)
 	if err != nil {
-		return fmt.Errorf("failed to resolve spec directory for component %#q:\n%w",
+		return fmt.Errorf("failed to resolve generation script for component %#q:\n%w",
 			component.GetName(), err)
 	}
 
-	// Verify the generation script is present before spinning up a mock chroot.
-	scriptHostPath := filepath.Join(specDir, ref.Origin.Script)
-
 	if _, statErr := fs.Stat(scriptHostPath); statErr != nil {
 		return fmt.Errorf("generation script %#q not found at %#q:\n%w",
-			ref.Origin.Script, scriptHostPath, statErr)
+			scriptName, scriptHostPath, statErr)
 	}
 
-	scriptTmpDir, genOutputTmpDir, cleanup, err := prepareStagingDirs(fs, scriptHostPath, ref.Origin.Script)
+	scriptTmpDir, genOutputTmpDir, cleanup, err := prepareStagingDirs(fs, scriptHostPath, scriptName)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func generateCustomSourceFile(
 
 	if len(ref.Origin.Inputs) > 0 {
 		if inputsErr := stageInputFiles(
-			dryRunnable, fs, ref.Origin.Inputs, destDirPath, scriptTmpDir, ref.Origin.Script,
+			dryRunnable, fs, ref.Origin.Inputs, destDirPath, scriptTmpDir, scriptName,
 		); inputsErr != nil {
 			return fmt.Errorf("failed to resolve inputs for custom source %#q:\n%w",
 				ref.Filename, inputsErr)
@@ -138,7 +138,7 @@ func generateCustomSourceFile(
 	// download upstream tarballs or toolchain artifacts.
 	runner := buildCustomRunner(baseRunner, scriptTmpDir, genOutputTmpDir)
 
-	if err := execScriptInChroot(ctx, runner, verbose, ref); err != nil {
+	if err := execScriptInChroot(ctx, runner, verbose, ref, scriptName); err != nil {
 		return err
 	}
 
@@ -157,6 +157,19 @@ func generateCustomSourceFile(
 		"path", destPath)
 
 	return nil
+}
+
+func resolveCustomScriptHostPath(component components.Component, scriptPath string) (string, error) {
+	if filepath.IsAbs(scriptPath) {
+		return scriptPath, nil
+	}
+
+	specDir, err := resolveComponentSpecDir(component)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(specDir, scriptPath), nil
 }
 
 // resolveComponentSpecDir returns the directory on the host filesystem that contains the
@@ -254,6 +267,7 @@ func execScriptInChroot(
 	runner *mock.Runner,
 	verbose bool,
 	ref *projectconfig.SourceFileReference,
+	scriptName string,
 ) error {
 	if initErr := runner.InitRoot(ctx); initErr != nil {
 		return fmt.Errorf("failed to initialize mock root for generating %#q:\n%w",
@@ -279,7 +293,7 @@ func execScriptInChroot(
 	// Use positional parameters so the script name is never re-parsed as shell code
 	// ($1=scriptDir, $2=scriptName; '--' sets $0 and keeps bash from consuming them).
 	cmd, cmdErr := runner.CmdInChroot(ctx, []string{
-		"sh", "-c", `cd "$1" && ./"$2"`, "--", customGenScriptDir, ref.Origin.Script,
+		"sh", "-c", `cd "$1" && ./"$2"`, "--", customGenScriptDir, scriptName,
 	}, false /* interactive */)
 	if cmdErr != nil {
 		return fmt.Errorf("failed to create chroot command for generating %#q:\n%w",
@@ -301,7 +315,7 @@ func execScriptInChroot(
 		scriptOutput := formatCustomScriptOutput(stdout.String(), stderr.String())
 
 		return fmt.Errorf("generation script %#q failed for source %#q%s\n%w",
-			ref.Origin.Script, ref.Filename, scriptOutput, runErr)
+			scriptName, ref.Filename, scriptOutput, runErr)
 	}
 
 	return nil
