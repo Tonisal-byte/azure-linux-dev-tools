@@ -272,6 +272,60 @@ func TestMergeComponentUpdates(t *testing.T) {
 	require.Equal(t, []string{"x", "y", "w"}, base.Build.Without)
 }
 
+func TestMergeComponentUpdates_LocalCustomScriptsUseSpecDirectory(t *testing.T) {
+	tests := []struct {
+		name    string
+		base    projectconfig.ComponentConfig
+		updates projectconfig.ComponentConfig
+	}{
+		{
+			name: "spec before source file",
+			base: projectconfig.ComponentConfig{
+				Spec: projectconfig.SpecSource{
+					SourceType: projectconfig.SpecSourceTypeLocal,
+					Path:       "/project/specs/example.spec",
+				},
+			},
+			updates: projectconfig.ComponentConfig{
+				SourceFiles: []projectconfig.SourceFileReference{{
+					Filename: "generated.tar.gz",
+					Origin: projectconfig.Origin{
+						Type:   projectconfig.OriginTypeCustom,
+						Script: "/project/overrides/generate.sh",
+					},
+				}},
+			},
+		},
+		{
+			name: "source file before spec",
+			base: projectconfig.ComponentConfig{
+				SourceFiles: []projectconfig.SourceFileReference{{
+					Filename: "generated.tar.gz",
+					Origin: projectconfig.Origin{
+						Type:   projectconfig.OriginTypeCustom,
+						Script: "/project/overrides/generate.sh",
+					},
+				}},
+			},
+			updates: projectconfig.ComponentConfig{
+				Spec: projectconfig.SpecSource{
+					SourceType: projectconfig.SpecSourceTypeLocal,
+					Path:       "/project/specs/example.spec",
+				},
+			},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := testCase.base.MergeUpdatesFrom(&testCase.updates)
+			require.NoError(t, err)
+			require.Len(t, testCase.base.SourceFiles, 1)
+			assert.Equal(t, "/project/specs/generate.sh", testCase.base.SourceFiles[0].Origin.Script)
+		})
+	}
+}
+
 func TestMergeComponentUpdates_OverlayFilesOverride(t *testing.T) {
 	base := projectconfig.ComponentConfig{
 		OverlayFiles: []string{"overlays/*.overlay.toml"},

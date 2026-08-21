@@ -72,10 +72,11 @@ type Origin struct {
 	// Uri to download the source file from if origin type is 'download'. Ignored for other origin types.
 	Uri string `toml:"uri,omitempty" json:"uri,omitempty" jsonschema:"title=URI,description=URI to download the source file from if origin type is 'download',example=https://example.com/source.tar.gz" fingerprint:"-"`
 
-	// Script is the filename of a shell script, relative to the component's spec directory,
-	// that is run inside a mock chroot to generate this source file.
+	// Script is the filename of a shell script run inside a mock chroot to generate this source file.
+	// For upstream components it is relative to the declaring config file; for local components
+	// it is relative to the component's spec directory.
 	// Required when [Origin.Type] is 'custom'; must be empty otherwise.
-	Script string `toml:"script,omitempty" json:"script,omitempty" jsonschema:"title=Script,description=Shell script filename (relative to the component spec directory) to run in mock to generate this source file. Required when origin type is 'custom'."`
+	Script string `toml:"script,omitempty" json:"script,omitempty" jsonschema:"title=Script,description=Shell script filename to run in mock to generate this source file. Relative to the declaring config file for upstream components or the component spec directory for local components. Required when origin type is 'custom'."`
 
 	// MockPackages is a list of RPM package names to install in the mock chroot before
 	// running [Origin.Script]. Only valid when [Origin.Type] is 'custom'.
@@ -465,7 +466,23 @@ func (c *ComponentConfig) MergeUpdatesFrom(other *ComponentConfig) error {
 		c.OverlayFiles = otherOverlayFiles
 	}
 
+	c.resolveLocalCustomScriptPaths()
+
 	return nil
+}
+
+func (c *ComponentConfig) resolveLocalCustomScriptPaths() {
+	if c.Spec.SourceType != SpecSourceTypeLocal || c.Spec.Path == "" {
+		return
+	}
+
+	scriptDir := filepath.Dir(c.Spec.Path)
+	for i := range c.SourceFiles {
+		origin := &c.SourceFiles[i].Origin
+		if origin.Type == OriginTypeCustom && origin.Script != "" {
+			origin.Script = filepath.Join(scriptDir, origin.EffectiveScriptName())
+		}
+	}
 }
 
 // EffectiveUpstreamCommit returns the commit to use for upstream operations.
