@@ -166,6 +166,8 @@ func initProjectGitRepo(t *testing.T, dir string) {
 		{"git", "init"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test User"},
+		// Avoid transient maintenance files racing with the subsequent container copy.
+		{"git", "config", "maintenance.auto", "false"},
 		{"git", "add", "."},
 		{"git", "-c", "commit.gpgsign=false", "commit", "-m", "Initial commit"},
 	}
