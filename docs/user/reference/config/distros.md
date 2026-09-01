@@ -55,6 +55,7 @@ Each distro can define multiple versions under `[distros.<name>.versions.<versio
 | Mock config | `mock-config` | string | No | Path to the mock config file for this version (architecture-independent) |
 | Mock config (x86_64) | `mock-config-x86_64` | string | No | Path to the x86_64-specific mock config file |
 | Mock config (aarch64) | `mock-config-aarch64` | string | No | Path to the aarch64-specific mock config file |
+| KIWI config override | `kiwi-config-override` | string | No | Path to KIWI configuration overrides for image builds using this version |
 | Inputs | `inputs` | [DistroVersionInputs](#inputs) | No | Per-use-case input RPM repositories for this version |
 
 ### Default Component Config
@@ -175,16 +176,17 @@ dist-git-branch = "rawhide"
 ```toml
 [distros.azurelinux]
 description = "Azure Linux"
-default-version = "4.0"
+default-version = "4.0-stage1"
 
-[distros.azurelinux.versions.'4.0']
-description = "Azure Linux 4.0"
+[distros.azurelinux.versions.'4.0-stage1']
+description = "Azure Linux 4.0 Stage 1"
 release-ver = "4.0"
-mock-config-x86_64 = "mock/azurelinux-4.0-x86_64.cfg"
-mock-config-aarch64 = "mock/azurelinux-4.0-aarch64.cfg"
+mock-config-x86_64 = "mock/azl4/stage1/azurelinux-4.0-x86_64.cfg"
+mock-config-aarch64 = "mock/azl4/stage1/azurelinux-4.0-aarch64.cfg"
+kiwi-config-override = "kiwi/azl4/stage1/azurelinux-4.0-kiwi-override.yml"
 
 # All components default to using Fedora 43 specs
-[distros.azurelinux.versions.'4.0'.default-component-config]
+[distros.azurelinux.versions.'4.0-stage1'.default-component-config]
 spec = { type = "upstream", upstream-distro = { name = "fedora", version = "43", snapshot = "2026-02-24T00:00:00-08:00" } }
 ```
 

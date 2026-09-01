@@ -30,6 +30,19 @@ Follow the interactive prompts to select an image definition and target architec
 | `--local-repo <path>` | Add a local RPM repository as a package source |
 | `--remote-repo <url>` | Add a remote RPM repository as a package source |
 | `--remote-repo-no-gpgcheck` | Disable GPG checking for remote repositories |
+## Override KIWI Configuration
+
+Set `kiwi-config-override` on the build distro version to override KIWI settings.
+The path is resolved relative to the TOML file that declares the distro version:
+
+```toml
+[distros.azurelinux.versions.'4.0-stage1']
+kiwi-config-override = "kiwi/azl4/stage1/azurelinux-4.0-kiwi-override.yml"
+```
+
+KIWI merges `--config` after its standard configuration files, giving these overrides
+the highest precedence. Merging is top-level: defining a section replaces that entire
+section from earlier files.
 
 ## Boot an Image
 

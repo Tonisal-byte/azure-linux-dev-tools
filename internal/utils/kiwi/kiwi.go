@@ -122,6 +122,9 @@ type Runner struct {
 	// targetDir is the directory where kiwi will write build output.
 	targetDir string
 
+	// configOverridePath contains optional highest-precedence KIWI overrides.
+	configOverridePath string
+
 	// localRepos are local RPM repositories to include during build.
 	localRepos []repoEntry
 
@@ -152,21 +155,29 @@ func NewRunner(ctx opctx.Ctx, descriptionDir string) *Runner {
 // Clone creates a deep copy of the provided [Runner] instance.
 func (r *Runner) Clone() *Runner {
 	return &Runner{
-		fs:             r.fs,
-		cmdFactory:     r.cmdFactory,
-		verbose:        r.verbose,
-		descriptionDir: r.descriptionDir,
-		targetDir:      r.targetDir,
-		localRepos:     deep.MustCopy(r.localRepos),
-		remoteRepos:    deep.MustCopy(r.remoteRepos),
-		profile:        r.profile,
-		targetArch:     r.targetArch,
+		fs:                 r.fs,
+		cmdFactory:         r.cmdFactory,
+		verbose:            r.verbose,
+		descriptionDir:     r.descriptionDir,
+		targetDir:          r.targetDir,
+		configOverridePath: r.configOverridePath,
+		localRepos:         deep.MustCopy(r.localRepos),
+		remoteRepos:        deep.MustCopy(r.remoteRepos),
+		profile:            r.profile,
+		targetArch:         r.targetArch,
 	}
 }
 
 // WithTargetDir sets the target directory where kiwi will write build output.
 func (r *Runner) WithTargetDir(targetDir string) *Runner {
 	r.targetDir = targetDir
+
+	return r
+}
+
+// WithConfigOverride passes configPath to KIWI's '--config' option.
+func (r *Runner) WithConfigOverride(configPath string) *Runner {
+	r.configOverridePath = configPath
 
 	return r
 }
@@ -354,6 +365,10 @@ func (r *Runner) Build(ctx context.Context) error {
 	kiwiArgs := []string{
 		KiwiBinary,
 		"--loglevel", logLevel,
+	}
+
+	if r.configOverridePath != "" {
+		kiwiArgs = append(kiwiArgs, "--config", r.configOverridePath)
 	}
 
 	if r.targetArch != "" {

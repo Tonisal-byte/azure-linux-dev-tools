@@ -86,6 +86,9 @@ type DistroVersionDefinition struct {
 	MockConfigPathX86_64  string `toml:"mock-config-x86_64,omitempty"  json:"mockConfigX8664,omitempty"   validate:"omitempty,filepath" jsonschema:"title=Mock config file,description=Path to the x86_64 mock config file for this version"`
 	MockConfigPathAarch64 string `toml:"mock-config-aarch64,omitempty" json:"mockConfigAarch64,omitempty" validate:"omitempty,filepath" jsonschema:"title=Mock config file,description=Path to the aarch64 mock config file for this version"`
 
+	// Path to KIWI configuration overrides for image builds.
+	KiwiConfigOverridePath string `toml:"kiwi-config-override,omitempty" json:"kiwiConfigOverride,omitempty" validate:"omitempty,filepath" jsonschema:"title=KIWI config override,description=Path to KIWI configuration overrides for this version"`
+
 	// Inputs maps build use-cases ([UseCaseRPMBuild], [UseCaseImageBuild]) to
 	// ordered lists of input references. Each entry references either a
 	// [RpmRepoResource] or a [RpmRepoSet]; sets are expanded at validation time.
@@ -195,6 +198,7 @@ func (v DistroVersionDefinition) WithAbsolutePaths(referenceDir string) DistroVe
 	result.DefaultComponentConfig = *(result.DefaultComponentConfig.WithAbsolutePaths(referenceDir))
 
 	result.MockConfigPath = makeAbsolute(referenceDir, result.MockConfigPath)
+	result.KiwiConfigOverridePath = makeAbsolute(referenceDir, result.KiwiConfigOverridePath)
 
 	return result
 }

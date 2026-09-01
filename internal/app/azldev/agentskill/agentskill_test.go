@@ -119,6 +119,13 @@ func TestUpdateComponentSkillStagesRenderedOutputBeforeAmend(t *testing.T) {
 		"both amend workflows must stage the post-commit render")
 }
 
+func TestImageSkillDocumentsRuntimeConfigOverride(t *testing.T) {
+	doc, err := agentskill.SkillDocument("azldev-image", testParams())
+	require.NoError(t, err)
+
+	assert.Contains(t, doc, "`kiwi-config-override`")
+}
+
 func TestSkillFrontmatterInvariants(t *testing.T) {
 	layout := agentskill.DefaultLayout()
 

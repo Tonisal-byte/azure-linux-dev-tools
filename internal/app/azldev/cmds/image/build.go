@@ -107,7 +107,10 @@ func NewImageBuildCmd() *cobra.Command {
 
 The image must be defined in the project configuration with a kiwi definition type.
 This command invokes kiwi-ng via sudo to build the image. Built image artifacts
-are placed in the project output directory.`,
+are placed in the project output directory.
+
+The selected distro version's 'kiwi-config-override' file is passed to kiwi-ng with
+'--config'.`,
 		Example: `  # Build an image by name
   azldev image build my-image
 
@@ -247,6 +250,22 @@ func createKiwiRunner(
 ) (*kiwi.Runner, error) {
 	runner := kiwi.NewRunner(env, filepath.Dir(imageConfig.Definition.Path)).
 		WithTargetDir(targetDir)
+
+	_, distroVerDef, err := env.Distro()
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve distro for image build:\n%w", err)
+	}
+
+	configOverridePath := distroVerDef.KiwiConfigOverridePath
+	if configOverridePath != "" {
+		if err := validateFileExists(env.FS(), configOverridePath); err != nil {
+			return nil, fmt.Errorf("invalid KIWI config override %#q:\n%w",
+				configOverridePath, err)
+		}
+
+		slog.Info("Using KIWI config override", "path", configOverridePath)
+		runner.WithConfigOverride(configOverridePath)
+	}
 
 	if imageConfig.Definition.Profile != "" {
 		runner.WithProfile(imageConfig.Definition.Profile)

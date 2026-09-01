@@ -4,12 +4,38 @@
 package projectconfig_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDistroDefinitionWithAbsolutePaths(t *testing.T) {
+	t.Parallel()
+
+	const referenceDir = "/project/distro"
+
+	distro := projectconfig.DistroDefinition{
+		Versions: map[string]projectconfig.DistroVersionDefinition{
+			"4.0-stage1": {
+				KiwiConfigOverridePath: "kiwi/azl4/stage1/azurelinux-4.0-kiwi-override.yml",
+			},
+		},
+	}
+
+	resolved := distro.WithAbsolutePaths(referenceDir)
+
+	assert.Equal(t,
+		filepath.Join(referenceDir, "kiwi/azl4/stage1/azurelinux-4.0-kiwi-override.yml"),
+		resolved.Versions["4.0-stage1"].KiwiConfigOverridePath,
+	)
+	assert.Equal(t,
+		"kiwi/azl4/stage1/azurelinux-4.0-kiwi-override.yml",
+		distro.Versions["4.0-stage1"].KiwiConfigOverridePath,
+	)
+}
 
 func TestDistroReferenceStringer(t *testing.T) {
 	t.Run("name and version", func(t *testing.T) {

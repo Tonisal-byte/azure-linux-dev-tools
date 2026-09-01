@@ -12,6 +12,9 @@ The image must be defined in the project configuration with a kiwi definition ty
 This command invokes kiwi-ng via sudo to build the image. Built image artifacts
 are placed in the project output directory.
 
+The selected distro version's 'kiwi-config-override' file is passed to kiwi-ng with
+'--config'.
+
 ```
 azldev image build [image-name] [flags]
 ```

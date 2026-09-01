@@ -582,6 +582,11 @@
           "title": "Mock config file",
           "description": "Path to the aarch64 mock config file for this version"
         },
+        "kiwi-config-override": {
+          "type": "string",
+          "title": "KIWI config override",
+          "description": "Path to KIWI configuration overrides for this version"
+        },
         "inputs": {
           "$ref": "#/$defs/DistroVersionInputs",
           "title": "Inputs",

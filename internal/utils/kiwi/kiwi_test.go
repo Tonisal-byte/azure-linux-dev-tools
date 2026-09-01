@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,7 +41,8 @@ func TestRunner_Clone(t *testing.T) {
 	ctx := testctx.NewCtx()
 
 	original := kiwi.NewRunner(ctx, "/original/description").
-		WithTargetDir("/original/target")
+		WithTargetDir("/original/target").
+		WithConfigOverride("/project/kiwi-override.yml")
 	original.AddLocalRepo("/repo1", nil)
 	original.AddLocalRepo("/repo2", nil)
 
@@ -56,6 +58,21 @@ func TestRunner_Clone(t *testing.T) {
 
 	assert.Equal(t, "/original/target", original.TargetDir())
 	assert.Equal(t, "/cloned/target", cloned.TargetDir())
+
+	var clonedArgs []string
+
+	ctx.CmdFactory.RunHandler = func(cmd *exec.Cmd) error {
+		clonedArgs = cmd.Args
+
+		return nil
+	}
+
+	require.NoError(t, cloned.Build(context.Background()))
+
+	configFlagIndex := slices.Index(clonedArgs, "--config")
+	require.NotEqual(t, -1, configFlagIndex)
+	require.Less(t, configFlagIndex+1, len(clonedArgs))
+	assert.Equal(t, "/project/kiwi-override.yml", clonedArgs[configFlagIndex+1])
 }
 
 func TestRunner_FluentMethods(t *testing.T) {
@@ -240,6 +257,31 @@ func TestRunner_Build(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunner_Build_ConfigOverride(t *testing.T) {
+	t.Parallel()
+
+	ctx := testctx.NewCtx()
+
+	var buildArgs []string
+
+	ctx.CmdFactory.RunHandler = func(cmd *exec.Cmd) error {
+		buildArgs = cmd.Args
+
+		return nil
+	}
+
+	runner := kiwi.NewRunner(ctx, "/description").
+		WithTargetDir("/work/output").
+		WithConfigOverride("/project/kiwi-override.yml")
+
+	require.NoError(t, runner.Build(context.Background()))
+
+	configFlagIndex := slices.Index(buildArgs, "--config")
+	require.NotEqual(t, -1, configFlagIndex)
+	require.Less(t, configFlagIndex+1, len(buildArgs))
+	assert.Equal(t, "/project/kiwi-override.yml", buildArgs[configFlagIndex+1])
 }
 
 func TestRunner_Build_LocalRepoFormatting(t *testing.T) {
