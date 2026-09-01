@@ -138,7 +138,7 @@ func TestComponentConfigWithAbsolutePaths(t *testing.T) {
 		assert.Equal(t, "generate.sh", comp.SourceFiles[0].Origin.Script)
 	})
 
-	t.Run("local custom source script", func(t *testing.T) {
+	t.Run("local custom source script preserves declaration directory", func(t *testing.T) {
 		comp := projectconfig.ComponentConfig{
 			Spec: projectconfig.SpecSource{
 				SourceType: projectconfig.SpecSourceTypeLocal,
@@ -155,7 +155,7 @@ func TestComponentConfigWithAbsolutePaths(t *testing.T) {
 
 		absComp := comp.WithAbsolutePaths(testRefDir)
 
-		assert.Equal(t, filepath.Join(testRefDir, "specs", "generate.sh"), absComp.SourceFiles[0].Origin.Script)
+		assert.Equal(t, filepath.Join(testRefDir, "generate.sh"), absComp.SourceFiles[0].Origin.Script)
 	})
 }
 
@@ -270,60 +270,6 @@ func TestMergeComponentUpdates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "test", base.Name)
 	require.Equal(t, []string{"x", "y", "w"}, base.Build.Without)
-}
-
-func TestMergeComponentUpdates_LocalCustomScriptsUseSpecDirectory(t *testing.T) {
-	tests := []struct {
-		name    string
-		base    projectconfig.ComponentConfig
-		updates projectconfig.ComponentConfig
-	}{
-		{
-			name: "spec before source file",
-			base: projectconfig.ComponentConfig{
-				Spec: projectconfig.SpecSource{
-					SourceType: projectconfig.SpecSourceTypeLocal,
-					Path:       "/project/specs/example.spec",
-				},
-			},
-			updates: projectconfig.ComponentConfig{
-				SourceFiles: []projectconfig.SourceFileReference{{
-					Filename: "generated.tar.gz",
-					Origin: projectconfig.Origin{
-						Type:   projectconfig.OriginTypeCustom,
-						Script: "/project/overrides/generate.sh",
-					},
-				}},
-			},
-		},
-		{
-			name: "source file before spec",
-			base: projectconfig.ComponentConfig{
-				SourceFiles: []projectconfig.SourceFileReference{{
-					Filename: "generated.tar.gz",
-					Origin: projectconfig.Origin{
-						Type:   projectconfig.OriginTypeCustom,
-						Script: "/project/overrides/generate.sh",
-					},
-				}},
-			},
-			updates: projectconfig.ComponentConfig{
-				Spec: projectconfig.SpecSource{
-					SourceType: projectconfig.SpecSourceTypeLocal,
-					Path:       "/project/specs/example.spec",
-				},
-			},
-		},
-	}
-
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			err := testCase.base.MergeUpdatesFrom(&testCase.updates)
-			require.NoError(t, err)
-			require.Len(t, testCase.base.SourceFiles, 1)
-			assert.Equal(t, "/project/specs/generate.sh", testCase.base.SourceFiles[0].Origin.Script)
-		})
-	}
 }
 
 func TestMergeComponentUpdates_OverlayFilesOverride(t *testing.T) {
@@ -544,6 +490,29 @@ func TestResolveComponentConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "curl", resolved.Name)
 		assert.Equal(t, projectconfig.SpecSourceTypeUpstream, resolved.Spec.SourceType)
+	})
+
+	t.Run("local custom scripts use effective spec directory", func(t *testing.T) {
+		comp := projectconfig.ComponentConfig{
+			Spec: projectconfig.SpecSource{
+				SourceType: projectconfig.SpecSourceTypeLocal,
+				Path:       "/project/specs/example.spec",
+			},
+			SourceFiles: []projectconfig.SourceFileReference{{
+				Filename: "generated.tar.gz",
+				Origin: projectconfig.Origin{
+					Type:   projectconfig.OriginTypeCustom,
+					Script: "/project/components/generate.sh",
+				},
+			}},
+		}
+
+		resolved, err := projectconfig.ResolveComponentConfig(
+			comp, projectconfig.ComponentConfig{}, projectconfig.ComponentConfig{}, nil, nil,
+		)
+		require.NoError(t, err)
+		require.Len(t, resolved.SourceFiles, 1)
+		assert.Equal(t, "/project/specs/generate.sh", resolved.SourceFiles[0].Origin.Script)
 	})
 
 	t.Run("single group", func(t *testing.T) {

@@ -466,8 +466,6 @@ func (c *ComponentConfig) MergeUpdatesFrom(other *ComponentConfig) error {
 		c.OverlayFiles = otherOverlayFiles
 	}
 
-	c.resolveLocalCustomScriptPaths()
-
 	return nil
 }
 
@@ -535,6 +533,8 @@ func ResolveComponentConfig(
 		return ComponentConfig{}, fmt.Errorf("failed to apply component config:\n%w", err)
 	}
 
+	merged.resolveLocalCustomScriptPaths()
+
 	return merged, nil
 }
 
@@ -566,15 +566,10 @@ func (c *ComponentConfig) WithAbsolutePaths(referenceDir string) *ComponentConfi
 	// Fix up paths.
 	result.Spec.Path = makeAbsolute(referenceDir, result.Spec.Path)
 
-	scriptDir := referenceDir
-	if result.Spec.SourceType == SpecSourceTypeLocal && result.Spec.Path != "" {
-		scriptDir = filepath.Dir(result.Spec.Path)
-	}
-
 	for i := range result.SourceFiles {
 		origin := &result.SourceFiles[i].Origin
 		if origin.Type == OriginTypeCustom {
-			origin.Script = makeAbsolute(scriptDir, origin.Script)
+			origin.Script = makeAbsolute(referenceDir, origin.Script)
 		}
 	}
 

@@ -55,6 +55,11 @@ func loadAndResolveProjectConfig(
 		}
 	}
 
+	for componentName, component := range resolvedCfg.Components {
+		component.resolveLocalCustomScriptPaths()
+		resolvedCfg.Components[componentName] = component
+	}
+
 	// Validate the resulting configuration.
 	err := resolvedCfg.Validate()
 	if err != nil {
