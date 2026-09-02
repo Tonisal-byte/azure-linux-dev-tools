@@ -72,11 +72,12 @@ type Origin struct {
 	// Uri to download the source file from if origin type is 'download'. Ignored for other origin types.
 	Uri string `toml:"uri,omitempty" json:"uri,omitempty" jsonschema:"title=URI,description=URI to download the source file from if origin type is 'download',example=https://example.com/source.tar.gz" fingerprint:"-"`
 
-	// Script is the filename of a shell script run inside a mock chroot to generate this source file.
+	// Script is the plain filename, with no path separators, of a shell script run inside a mock
+	// chroot to generate this source file.
 	// For upstream components it is relative to the declaring config file; for local components
 	// it is relative to the component's spec directory.
 	// Required when [Origin.Type] is 'custom'; must be empty otherwise.
-	Script string `toml:"script,omitempty" json:"script,omitempty" jsonschema:"title=Script,description=Shell script filename to run in mock to generate this source file. Relative to the declaring config file for upstream components or the component spec directory for local components. Required when origin type is 'custom'."`
+	Script string `toml:"script,omitempty" json:"script,omitempty" jsonschema:"title=Script,description=Plain shell script filename with no path separators. Relative to the declaring config file for upstream components or the component spec directory for local components. Required when origin type is 'custom'."`
 
 	// MockPackages is a list of RPM package names to install in the mock chroot before
 	// running [Origin.Script]. Only valid when [Origin.Type] is 'custom'.
