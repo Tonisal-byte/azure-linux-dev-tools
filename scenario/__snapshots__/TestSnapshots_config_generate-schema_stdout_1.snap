@@ -872,7 +872,7 @@
         "script": {
           "type": "string",
           "title": "Script",
-          "description": "Shell script filename to run in mock to generate this source file. Relative to the declaring config file for upstream components or the component spec directory for local components. Required when origin type is 'custom'."
+          "description": "Plain shell script filename with no path separators. Relative to the declaring config file for upstream components or the component spec directory for local components. Required when origin type is 'custom'."
         },
         "mock-packages": {
           "items": {
